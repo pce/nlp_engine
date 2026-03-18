@@ -59,7 +59,7 @@ The engine treats **'y'** as a vowel. This is essential for correctly counting s
 ### Silent 'e' (Language Awareness)
 
 - **English**: Trailing 'e' is often silent (_home_, _fate_) and is subtracted from the syllable count to ensure an accurate Flesch-Kincaid score.
-- **German/French**: In these languages, a trailing 'e' is almost always a spoken schwa (_Liebe_, _Hause_, _Route_). The engine attempts to adjust this logic based on the detected language to maintain accuracy for ICALL applications.
+- **German/French**: In these languages, a trailing 'e' often represents a spoken schwa (Schwa-Laut) sound in German (_Liebe_, _Hause_) or influences pronunciation in French (_Route_). Unlike English, it usually constitutes or supports a syllable, so the engine preserves it to maintain accuracy for ICALL applications.
 
 _Note: As a rule-based engine, edge cases in complex morphology may still result in approximations._
 
@@ -70,7 +70,7 @@ _Note: As a rule-based engine, edge cases in complex morphology may still result
 **Prerequisites:** CMake (3.14+), C++17 compiler, Doxygen (optional).
 
 ```bash
-# 1. Configure and download dependencies (via CPM)
+# 1. Configure and download dependencies
 cmake -B build -S .
 
 # 2. Build library, tests, and examples

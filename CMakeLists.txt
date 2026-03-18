@@ -92,6 +92,8 @@ if(DOXYGEN_FOUND)
             "GENERATE_HTML          = YES\n"
             "HTML_OUTPUT            = html\n"
             "EXTRACT_ALL            = YES\n"
+            "EXTRACT_PRIVATE        = YES\n"
+            "EXTRACT_STATIC         = YES\n"
             "CLASS_DIAGRAMS         = YES\n"
         )
     endif()
@@ -100,6 +102,8 @@ if(DOXYGEN_FOUND)
 
     add_custom_target(docs
         COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+        # CRITICAL: Disable Jekyll for GitHub Pages to show files with underscores
+        COMMAND ${CMAKE_COMMAND} -E touch ${DOXYGEN_HTML_DIR}/.nojekyll
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Generating API documentation (Output in build/docs/html)"
         VERBATIM
