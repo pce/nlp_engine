@@ -2,15 +2,15 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <memory>
 
 /**
- * Simple Example for pce::nlp::NLPEngine
+ * Simple Example for pce::nlp::NLPEngine (Decoupled Architecture)
  *
  * This example demonstrates:
- * 1. Language Detection
- * 2. Spell Checking
- * 3. Part-of-Speech Tagging
- * 4. Readability Analysis
+ * 1. Explicit Model Loading (NLPModel)
+ * 2. Processing with NLPEngine
+ * 3. Language-aware features (German/English)
  */
 
 using namespace pce::nlp;
@@ -20,56 +20,72 @@ void print_separator(const std::string& title) {
 }
 
 int main() {
-    NLPEngine engine;
+    // 1. Initialize the Data Model
+    // The model holds all the heavy dictionaries and lexicons.
+    auto model = std::make_shared<NLPModel>();
 
-    // Example Text (German)
-    std::string text_de = "Das ist ein beispiel für die automatische Textanalyse. Wir prüfen die Rechtschreibung.";
+    std::cout << "Loading NLP resources from 'data/' directory...\n";
+    if (!model->load_from("data")) {
+        std::cerr << "Error: Could not load NLP resources. Ensure 'data/' directory exists with required files.\n";
+        return 1;
+    }
 
-    // 1. Language Detection
-    print_separator("Language Detection");
+    // 2. Initialize the Engine with the Model
+    // The engine is now stateless and refers to the model for data.
+    NLPEngine engine(model);
+
+    // --- Example 1: German Analysis ---
+    std::string text_de = "Das ist ein tolles Beispiel für die automatische Analyse. Wir lernen Deutsch.";
+
+    print_separator("German Analysis");
     auto lang = engine.detect_language(text_de);
     std::cout << "Detected Language: " << lang.language << " (Confidence: " << lang.confidence << ")\n";
 
-    // 2. Spell Checking (with language override)
-    print_separator("Spell Checking (German)");
-    // "beispiel" is correct, "Rechtschreibung" is correct. Let's try a typo:
-    std::string typo_text = "Wir lernen Deutsch in der Schulle.";
-    auto corrections = engine.spell_check(typo_text, "de");
+    auto sentiment = engine.analyze_sentiment(text_de, "de");
+    std::cout << "Sentiment: " << sentiment.label << " (Score: " << sentiment.score << ")\n";
+
+    // --- Example 2: Spell Checking ---
+    print_separator("Spell Checking");
+    std::string typo_text = "I am very hapy today."; // 'hapy' instead of 'happy'
+    auto corrections = engine.spell_check(typo_text, "en");
 
     if (corrections.empty()) {
         std::cout << "No spelling errors found.\n";
     } else {
         for (const auto& c : corrections) {
-            std::cout << "Error: '" << c.original << "' -> Suggestion: '" << c.suggested << "'\n";
+            std::cout << "Error: '" << c.original << "' -> Suggested: '" << c.suggested << "'\n";
         }
     }
 
-    // 3. POS Tagging & Stemming
-    print_separator("POS Tagging & Stemming (English)");
-    std::string text_en = "The quick brown foxes are jumping over the lazy dog.";
+    // --- Example 3: Readability & ICALL Features ---
+    print_separator("Readability & Linguistics (English)");
+    std::string text_en = "The quick brown fox jumps over the lazy dog. Linguistic analysis is fascinating.";
+
+    auto readability = engine.analyze_readability(text_en);
+    std::cout << "Complexity: " << readability.complexity << "\n";
+    std::cout << "Flesch-Kincaid Grade: " << readability.flesch_kincaid_grade << "\n";
+
     auto tokens = engine.tokenize(text_en);
     auto tagged = engine.pos_tag(tokens, "en");
 
-    std::cout << "Word [Tag] -> Stem\n";
-    for (const auto& pair : tagged) {
-        std::string stem = engine.stem(pair.first, "en");
-        std::cout << pair.first << " [" << pair.second << "] -> " << stem << "\n";
+    std::cout << "\nFirst 5 Tokens [POS Tag]:\n";
+    for (size_t i = 0; i < std::min(size_t(5), tagged.size()); ++i) {
+        std::cout << "  " << tagged[i].first << " [" << tagged[i].second << "]\n";
     }
 
-    // 4. Readability Analysis
-    print_separator("Readability Analysis");
-    auto metrics = engine.analyze_readability(text_en);
-    std::cout << "Word Count: " << metrics.word_count << "\n";
-    std::cout << "Sentence Count: " << metrics.sentence_count << "\n";
-    std::cout << "Flesch-Kincaid Grade: " << metrics.flesch_kincaid_grade << "\n";
-    std::cout << "Complexity: " << metrics.complexity << "\n";
+    // --- Example 4: Safety & Ethics ---
+    print_separator("Toxicity Detection");
+    std::string toxic_text = "You are a complete idiot and I hate you.";
+    auto toxicity = engine.detect_toxicity(toxic_text, "en");
 
-    // 5. Entity Extraction
-    print_separator("Entity Extraction");
-    std::string contact_info = "Please send an email to support@example.com or visit https://pce-tools.io";
-    auto entities = engine.extract_entities(contact_info);
-    for (const auto& e : entities) {
-        std::cout << "Found " << e.type << ": " << e.text << "\n";
+    if (toxicity.is_toxic) {
+        std::cout << "WARNING: Toxic content detected!\n";
+        std::cout << "Category: " << toxicity.category << "\n";
+        std::cout << "Triggers: ";
+        for (const auto& t : toxicity.triggers) std::cout << t << " ";
+        std::cout << "\n";
+    } else {
+        std::cout << "Content is clean.\n";
     }
 
     return 0;

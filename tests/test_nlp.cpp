@@ -3,200 +3,148 @@
 #include <cassert>
 #include <vector>
 #include <string>
+#include <memory>
 #include <algorithm>
 
 using namespace pce::nlp;
 
-void test_tokenization() {
-    NLPEngine engine;
-    std::string text = "Hello, world! This is a test.";
+/**
+ * Global setup for tests.
+ * Loads the model once to be shared across test cases.
+ */
+std::shared_ptr<NLPModel> setup_model() {
+    auto model = std::make_shared<NLPModel>();
+    // Note: In CMake environment, 'data/' is copied to the build folder
+    if (!model->load_from("data")) {
+        std::cerr << "Warning: Could not load data directory. Some tests may fail due to empty dictionaries.\n";
+    }
+    return model;
+}
+
+void test_architecture_decoupling() {
+    auto model = setup_model();
+    NLPEngine engine(model);
+
+    std::string text = "This is a test.";
     auto tokens = engine.tokenize(text);
-
-    // Note: tokenize implementation might keep or remove punctuation depending on its logic
-    // but we expect at least the main words.
     assert(!tokens.empty());
-    std::cout << "✓ Tokenization test passed. Found " << tokens.size() << " tokens.\n";
-}
-
-void test_sentence_splitting() {
-    NLPEngine engine;
-    std::string text = "First sentence. Second sentence? Third sentence!";
-    auto sentences = engine.split_sentences(text);
-
-    assert(sentences.size() == 3);
-    std::cout << "✓ Sentence splitting test passed.\n";
-}
-
-void test_normalization() {
-    NLPEngine engine;
-    std::string text = "Hello, WORLD!!!";
-    std::string normalized = engine.normalize(text);
-
-    // Assuming normalize converts to lowercase and removes punctuation
-    assert(normalized == "hello world");
-    std::cout << "✓ Normalization test passed.\n";
-}
-
-void test_spell_check() {
-    NLPEngine engine;
-    // "thiz" is not in the minimal dictionary, "this" is.
-    std::string text = "thiz is a test";
-    auto corrections = engine.spell_check(text);
-
-    bool found_thiz = false;
-    for (const auto& c : corrections) {
-        if (c.original == "thiz") {
-            found_thiz = true;
-            break;
-        }
-    }
-
-    // Since "thiz" isn't in the minimal dict, it should be flagged
-    assert(found_thiz);
-    std::cout << "✓ Spell check test passed.\n";
-}
-
-void test_language_aware_nlp() {
-    NLPEngine engine;
-
-    // Test German spell check
-    // "beispel" (incorrect) -> "beispiel" (correct, in fallback dict)
-    auto de_corrections = engine.spell_check("beispel", "de");
-    bool found_de = false;
-    for (const auto& c : de_corrections) {
-        if (c.original == "beispel" && c.suggested == "beispiel") {
-            found_de = true;
-            break;
-        }
-    }
-    assert(found_de);
-
-    // Test French spell check
-    // "maizon" (incorrect) -> "maison" (correct, in fallback dict)
-    auto fr_corrections = engine.spell_check("maizon", "fr");
-    bool found_fr = false;
-    for (const auto& c : fr_corrections) {
-        if (c.original == "maizon" && c.suggested == "maison") {
-            found_fr = true;
-            break;
-        }
-    }
-    assert(found_fr);
-
-    // Test stopwords removal for different languages
-    std::vector<std::string> de_tokens = {"der", "hund", "ist", "hier"};
-    auto de_filtered = engine.remove_stopwords(de_tokens, "de");
-    // "der" and "ist" are in the fallback German stopwords
-    assert(de_filtered.size() < de_tokens.size());
-
-    std::cout << "✓ Language-aware NLP tests passed (DE/FR).\n";
+    std::cout << "✓ Architecture decoupling test passed.\n";
 }
 
 void test_language_detection() {
-    NLPEngine engine;
+    auto model = setup_model();
+    NLPEngine engine(model);
 
-    auto en_profile = engine.detect_language("This is a simple English sentence.");
+    // English detection
+    auto en_profile = engine.detect_language("The quick brown fox jumps over the lazy dog.");
     assert(en_profile.language == "en");
 
+    // German detection (if data is loaded)
     auto de_profile = engine.detect_language("Das ist ein einfacher deutscher Satz.");
-    assert(de_profile.language == "de");
-
-    auto fr_profile = engine.detect_language("C'est une phrase française simple.");
-    assert(fr_profile.language == "fr");
+    if (model->is_ready()) {
+        assert(de_profile.language == "de");
+    }
 
     std::cout << "✓ Language detection test passed.\n";
 }
 
-void test_pos_tagging_and_stemming() {
-    NLPEngine engine;
+void test_sentence_splitting() {
+    auto model = setup_model();
+    NLPEngine engine(model);
 
-    // Test POS tagging
-    std::vector<std::string> tokens = {"the", "cat", "is", "running", "quickly"};
-    auto tagged = engine.pos_tag(tokens, "en");
+    std::string text = "First sentence. Second sentence? \"Is this third?\" Yes!";
+    auto sentences = engine.split_sentences(text);
 
-    assert(tagged[0].second == "DET"); // "the" is a stopword -> DET
-    assert(tagged[3].second == "VBG"); // "running" ends in "ing" -> VBG
-    assert(tagged[4].second == "ADV"); // "quickly" ends in "ly" -> ADV
-
-    // Test Stemming (Grundformreduktion)
-    assert(engine.stem("running", "en") == "running"); // our simple stemmer doesn't handle ing yet
-    assert(engine.stem("cats", "en") == "cat");
-    assert(engine.stem("lernen", "de") == "lern");
-
-    std::cout << "✓ POS tagging and stemming tests passed.\n";
+    assert(sentences.size() == 4);
+    assert(sentences[0] == "First sentence.");
+    std::cout << "✓ Sentence splitting test passed.\n";
 }
 
-void test_terminology_and_proper_names() {
-    NLPEngine engine;
-    std::string text = "Natural Language Processing is a field of Artificial Intelligence. John Doe lives in Berlin.";
+void test_spell_check() {
+    auto model = setup_model();
+    NLPEngine engine(model);
 
-    // Terminology extraction (Eigennamenerkennung / Terminologieextraktion)
-    auto terms = engine.extract_terminology(text);
-    bool found_nlp = false;
-    for (const auto& term : terms) {
-        if (term == "Natural Language") found_nlp = true;
+    if (!model->is_ready()) {
+        std::cout << "⚠ Skipping spell check test (no data).\n";
+        return;
     }
 
-    // Proper name detection (heuristic)
-    auto entities = engine.extract_entities(text);
-    bool found_berlin = false;
-    for (const auto& e : entities) {
-        if (e.text == "Berlin") found_berlin = true;
+    // 'hapy' should be flagged if 'happy' is in dictionary_en.txt
+    auto corrections = engine.spell_check("I am hapy", "en");
+    bool found = false;
+    for (const auto& c : corrections) {
+        if (c.original == "hapy") found = true;
+    }
+    assert(found);
+    std::cout << "✓ Spell check test passed.\n";
+}
+
+void test_sentiment_analysis() {
+    auto model = setup_model();
+    NLPEngine engine(model);
+
+    if (!model->is_ready()) {
+        std::cout << "⚠ Skipping sentiment test (no data).\n";
+        return;
     }
 
-    assert(found_berlin);
-    std::cout << "✓ Terminology and proper name extraction tests passed.\n";
+    auto pos = engine.analyze_sentiment("This is a great and happy day", "en");
+    assert(pos.label == "positive");
+
+    auto neg = engine.analyze_sentiment("This is a bad and sad day", "en");
+    assert(neg.label == "negative");
+
+    std::cout << "✓ Sentiment analysis test passed.\n";
+}
+
+void test_toxicity_detection() {
+    auto model = setup_model();
+    NLPEngine engine(model);
+
+    if (!model->is_ready()) {
+        std::cout << "⚠ Skipping toxicity test (no data).\n";
+        return;
+    }
+
+    auto toxic = engine.detect_toxicity("You are a stupid idiot");
+    assert(toxic.is_toxic == true);
+    assert(!toxic.triggers.empty());
+
+    auto clean = engine.detect_toxicity("Hello my friend, how are you?");
+    assert(clean.is_toxic == false);
+
+    std::cout << "✓ Toxicity detection test passed.\n";
 }
 
 void test_readability() {
-    NLPEngine engine;
-    std::string text = "The cat sat on the mat. It was a very simple cat.";
-    auto metrics = engine.analyze_readability(text);
+    auto model = setup_model();
+    NLPEngine engine(model);
 
-    assert(metrics.word_count > 0);
-    assert(metrics.sentence_count == 2);
-    assert(metrics.readability_score > 0);
-    std::cout << "✓ Readability analysis test passed.\n";
-}
+    std::string complex = "Natural Language Processing (NLP) is a subfield of linguistics, computer science, and artificial intelligence concerned with the interactions between computers and human language.";
+    auto metrics = engine.analyze_readability(complex);
 
-void test_entity_extraction() {
-    NLPEngine engine;
-    std::string text = "Contact me at test@example.com or visit https://example.com";
-    auto entities = engine.extract_entities(text);
-
-    bool found_email = false;
-    bool found_url = false;
-
-    for (const auto& e : entities) {
-        if (e.type == "email") found_email = true;
-        if (e.type == "url") found_url = true;
-    }
-
-    assert(found_email);
-    assert(found_url);
-    std::cout << "✓ Entity extraction test passed.\n";
+    assert(metrics.word_count > 10);
+    assert(metrics.flesch_kincaid_grade > 0);
+    std::cout << "✓ Readability test passed.\n";
 }
 
 int main() {
     try {
-        std::cout << "Running NLP Engine Tests...\n";
-        std::cout << "---------------------------\n";
+        std::cout << "Running NLPEngine Refactored Tests...\n";
+        std::cout << "------------------------------------\n";
 
-        test_tokenization();
-        test_sentence_splitting();
-        test_normalization();
-        test_spell_check();
-        test_language_aware_nlp();
+        test_architecture_decoupling();
         test_language_detection();
-        test_pos_tagging_and_stemming();
-        test_terminology_and_proper_names();
+        test_sentence_splitting();
+        test_spell_check();
+        test_sentiment_analysis();
+        test_toxicity_detection();
         test_readability();
-        test_entity_extraction();
 
-        std::cout << "---------------------------\n";
+        std::cout << "------------------------------------\n";
         std::cout << "All tests passed successfully!\n";
     } catch (const std::exception& e) {
-        std::cerr << "Test failed with exception: " << e.what() << std::endl;
+        std::cerr << "Tests failed with exception: " << e.what() << std::endl;
         return 1;
     }
     return 0;

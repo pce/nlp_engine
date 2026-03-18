@@ -4,401 +4,207 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
 
 namespace pce::nlp {
 
-/**
- * @struct Correction
- * @brief Represents a suggested spelling correction.
- */
+// ============ Data Structures ============
+
 struct Correction {
-  std::string original;   /**< The original word. */
-  std::string suggested;  /**< The suggested replacement. */
-  float confidence;       /**< Confidence score (0.0 to 1.0). */
-  std::string reason;     /**< Reason for the correction. */
+  std::string original;
+  std::string suggested;
+  float confidence;
+  std::string reason;
 };
 
-/**
- * @struct Keyword
- * @brief Represents an extracted keyword or term.
- */
 struct Keyword {
-  std::string term;       /**< The keyword string. */
-  float frequency;        /**< Raw frequency in text. */
-  float tfidf_score;      /**< Calculated TF-IDF score. */
-  std::string pos;        /**< Part of speech tag. */
+  std::string term;
+  float frequency;
+  float tfidf_score;
+  std::string pos;
 };
 
-/**
- * @struct Entity
- * @brief Represents a named entity (Date, Email, URL, etc.) or proper noun.
- */
 struct Entity {
-  std::string text;       /**< The extracted text. */
-  std::string type;       /**< Entity type (e.g., "email", "url", "proper_noun"). */
-  size_t position;        /**< Character position in text. */
-  float confidence;       /**< Confidence score. */
+  std::string text;
+  std::string type;
+  size_t position;
+  float confidence;
 };
 
-/**
- * @struct ReadabilityMetrics
- * @brief Detailed readability statistics of a document.
- */
 struct ReadabilityMetrics {
-  float flesch_kincaid_grade;     /**< US grade level. */
-  float readability_score;        /**< Flesch Reading Ease (0-100). */
-  std::string complexity;         /**< Label: "easy", "medium", "hard". */
-  std::vector<std::string> suggestions; /**< Improvement tips. */
+  float flesch_kincaid_grade;
+  float readability_score;
+  std::string complexity;
+  std::vector<std::string> suggestions;
   int word_count;
   int sentence_count;
   float avg_sentence_length;
 };
 
-/**
- * @struct SummaryResult
- * @brief Result of text summarization.
- */
 struct SummaryResult {
-  std::string summary;                /**< The generated summary text. */
-  std::vector<size_t> selected_sentences; /**< Indices of original sentences used. */
-  float ratio;                        /**< Compression ratio. */
+  std::string summary;
+  std::vector<size_t> selected_sentences;
+  float ratio;
   int original_length;
   int summary_length;
 };
 
-/**
- * @struct LanguageProfile
- * @brief Result of language identification.
- */
 struct LanguageProfile {
-  std::string language;               /**< ISO 639-1 code (en, de, fr). */
-  float confidence;                   /**< Identification confidence. */
-  std::map<std::string, float> script_distribution; /**< Script analysis. */
+  std::string language;
+  float confidence;
+  std::map<std::string, float> script_distribution;
 };
 
-/**
- * @struct SentimentResult
- * @brief Result of sentiment analysis.
- */
 struct SentimentResult {
-  float score;                        /**< Sentiment score (-1.0 to 1.0). */
-  std::string label;                  /**< "positive", "negative", or "neutral". */
-  float confidence;                   /**< Confidence score. */
+  float score;
+  std::string label;
+  float confidence;
 };
 
-/**
- * @struct ToxicityResult
- * @brief Result of toxicity and offensive language detection.
- */
 struct ToxicityResult {
-  bool is_toxic;                      /**< Whether the text is considered toxic. */
-  float score;                        /**< Toxicity score (0.0 to 1.0). */
-  std::vector<std::string> triggers;  /**< Specific words/patterns that triggered detection. */
-  std::string category;               /**< "profanity", "hate_speech", "none", etc. */
+  bool is_toxic;
+  float score;
+  std::vector<std::string> triggers;
+  std::string category;
 };
 
 struct DocumentStructure {
- * @brief Analysis of document layout and metadata.
- */
-struct DocumentStructure {
-  std::string doc_type;               /**< e.g., "report", "article". */
+  std::string doc_type;
   std::vector<std::string> sections;
   std::vector<std::string> headings;
-  int estimated_reading_time;         /**< Minutes. */
+  int estimated_reading_time;
   float estimated_complexity;
 };
 
-// ============ Main Engine Interface ============
+// ============ Data Model ============
+
+/**
+ * @class NLPModel
+ * @brief Manages the loading and storage of linguistic resources (dictionaries, lexicons).
+ *
+ * Separating data from logic allows for resource sharing between multiple engines
+ * and simplifies cross-platform path management.
+ */
+class NLPModel {
+public:
+  NLPModel() = default;
+  ~NLPModel() = default;
+
+  /**
+   * @brief Load all resources from a specific directory.
+   * @param base_path Path to the directory containing .txt resource files.
+   * @return true if critical resources were successfully loaded.
+   */
+  bool load_from(const std::string& base_path);
+
+  // --- Resource Getters ---
+  const std::vector<std::string>& get_stopwords(const std::string& lang) const;
+  const std::vector<std::string>& get_dictionary(const std::string& lang) const;
+  const std::map<std::string, float>& get_positive_lexicon() const { return positive_words_; }
+  const std::map<std::string, float>& get_negative_lexicon() const { return negative_words_; }
+  const std::vector<std::string>& get_toxic_patterns() const { return toxic_patterns_; }
+
+  bool is_ready() const { return is_ready_; }
+  std::string get_current_path() const { return current_path_; }
+
+  /**
+   * @struct DataModel
+   * @brief Internal storage for all linguistic resources.
+   */
+  struct DataModel {
+    std::map<std::string, std::vector<std::string>> stopwords;    ///< Map of language codes to lists of stop words.
+    std::map<std::string, std::vector<std::string>> dictionaries;  ///< Map of language codes to full dictionary word lists.
+    std::map<std::string, float> positive_lexicon;                ///< Map of words to positive sentiment scores.
+    std::map<std::string, float> negative_lexicon;                ///< Map of words to negative sentiment scores.
+    std::vector<std::string> toxic_patterns;                      ///< List of patterns/words used for toxicity detection.
+  };
+
+  const DataModel& get_data() const { return data_; }
+
+private:
+  bool is_ready_ = false;
+  std::string current_path_;
+
+  DataModel data_;
+
+  // Language Resources (cached view for legacy getters)
+  std::vector<std::string> en_stopwords_, de_stopwords_, fr_stopwords_;
+  std::vector<std::string> en_dict_, de_dict_, fr_dict_;
+
+  // Sentiment & Toxicity Resources (cached view for legacy getters)
+  std::map<std::string, float> positive_words_;
+  std::map<std::string, float> negative_words_;
+  std::vector<std::string> toxic_patterns_;
+
+  // Internal Loader Helpers
+  bool load_file_to_vec(const std::string& path, std::vector<std::string>& target);
+  bool load_lexicon_to_map(const std::string& path, std::map<std::string, float>& target);
+};
+
+// ============ Processing Engine ============
 
 /**
  * @class NLPEngine
- * @brief Core NLP Engine for text processing without heavy ML dependencies.
+ * @brief Stateless processing logic for NLP tasks.
  *
- * Provides features for tokenization, language detection, spell checking,
- * summarization, keyword extraction, and readability analysis.
+ * Requires an NLPModel to perform language-aware operations.
  */
 class NLPEngine {
 public:
   /**
-   * @brief Constructs the NLPEngine and loads dictionaries/stopwords.
+   * @brief Construct engine with a shared model.
+   * @param model Pointer to a loaded NLPModel.
    */
-  explicit NLPEngine();
+  explicit NLPEngine(std::shared_ptr<NLPModel> model);
   ~NLPEngine() = default;
 
-  // ===== Tokenization & Basic Processing =====
-
-  /**
-   * Detect the language of the given text.
-   * @param text The input text to analyze.
-   * @return A LanguageProfile containing the detected ISO code and confidence.
-   */
+  // --- Processing Methods ---
   LanguageProfile detect_language(const std::string& text);
-
-  /**
-   * @brief Analyze the sentiment of the text.
-   * @param text Input text.
-   * @param language ISO language code.
-   * @return SentimentResult with score and label.
-   */
-  SentimentResult analyze_sentiment(const std::string& text, const std::string& language = "en");
-
-  /**
-   * @brief Detect toxicity or offensive language.
-   * @param text Input text.
-   * @param language ISO language code.
-   * @return ToxicityResult with detection details.
-   */
-  ToxicityResult detect_toxicity(const std::string& text, const std::string& language = "en");
-
-  /**
-   * @brief Split text into tokens (words).
-   * @param text Input string.
-   * @return Vector of word tokens.
-   */
   std::vector<std::string> tokenize(const std::string& text);
-
-  /**
-   * @brief Split text into sentences.
-   * @param text Input string.
-   * @return Vector of individual sentences.
-   */
   std::vector<std::string> split_sentences(const std::string& text);
-
-  /**
-   * @brief Remove stop words (common words: the, a, and, etc.) for a specific language.
-   * @param tokens Vector of tokens to filter.
-   * @param language ISO language code ("en", "de", "fr").
-   * @return Filtered vector of tokens.
-   */
-  std::vector<std::string> remove_stopwords(
-    const std::vector<std::string>& tokens,
-    const std::string& language = "en"
-  );
-
-  /**
-   * @brief Convert to lowercase and remove punctuation.
-   * @param text Input string.
-   * @return Normalized string.
-   */
+  std::vector<std::string> remove_stopwords(const std::vector<std::string>& tokens, const std::string& lang = "en");
   std::string normalize(const std::string& text);
 
-  // ===== Spell Checking =====
-
-  /**
-   * @brief Check spelling and suggest corrections.
-   * @param text Input text.
-   * @param language ISO language code.
-   * @return Vector of Correction objects.
-   */
-  std::vector<Correction> spell_check(
-    const std::string& text,
-    const std::string& language = "en"
-  );
-
-  /**
-   * @brief Get spelling suggestions for a single word.
-   * @param word The misspelled word.
-   * @param max_distance Maximum Levenshtein distance allowed.
-   * @param language ISO language code.
-   * @return List of suggested strings.
-   */
-  std::vector<std::string> get_spelling_suggestions(
-    const std::string& word,
-    int max_distance = 2,
-    const std::string& language = "en"
-  );
-
-  /**
-   * @brief Calculate Levenshtein distance between two strings.
-   */
+  std::vector<Correction> spell_check(const std::string& text, const std::string& lang = "en");
+  std::vector<std::string> get_spelling_suggestions(const std::string& word, int max_dist = 2, const std::string& lang = "en");
   static int levenshtein_distance(const std::string& s1, const std::string& s2);
 
-  // ===== Summarization =====
-
-  /**
-   * @brief Extract key sentences from text using TF-IDF ranking.
-   * @param text Input text.
-   * @param ratio Summary length relative to original (0.0 to 1.0).
-   * @return SummaryResult containing the summary string.
-   */
-  SummaryResult summarize(
-    const std::string& text,
-    float ratio = 0.3
-  );
-
-  /**
-   * @brief Calculate TF-IDF scores for terms in the document.
-   */
+  SummaryResult summarize(const std::string& text, float ratio = 0.3);
   std::map<std::string, float> calculate_tfidf(const std::string& text);
 
-  // ===== Keyword & Terminology Extraction =====
+  std::vector<Keyword> extract_keywords(const std::string& text, int max_keywords = 10, const std::string& lang = "en");
+  std::vector<std::string> extract_terminology(const std::string& text, const std::string& lang = "en");
 
-  /**
-   * @brief Extract important keywords from text.
-   * @param text Input text.
-   * @param max_keywords Limit of keywords to return.
-   * @param language ISO language code.
-   * @return Vector of Keyword structures.
-   */
-  std::vector<Keyword> extract_keywords(
-    const std::string& text,
-    int max_keywords = 10,
-    const std::string& language = "en"
-  );
+  std::vector<std::pair<std::string, std::string>> pos_tag(const std::vector<std::string>& tokens, const std::string& lang = "en");
+  std::string stem(const std::string& word, const std::string& lang = "en");
 
-  /**
-   * @brief Extract terminology (multi-word terms).
-   * @param text Input text.
-   * @param language ISO language code.
-   * @return Vector of term strings.
-   */
-  std::vector<std::string> extract_terminology(
-    const std::string& text,
-    const std::string& language = "en"
-  );
-
-  /**
-   * @brief Calculate frequency of each term in tokens.
-   */
-  std::map<std::string, float> calculate_term_frequency(
-    const std::vector<std::string>& tokens
-  );
-
-  // ===== Entity Extraction & POS Tagging =====
-
-  /**
-   * @brief Perform basic Part-of-Speech tagging based on heuristics.
-   * @param tokens List of tokens.
-   * @param language ISO language code.
-   * @return Vector of pairs {word, tag}.
-   */
-  std::vector<std::pair<std::string, std::string>> pos_tag(
-    const std::vector<std::string>& tokens,
-    const std::string& language = "en"
-  );
-
-  /**
-   * @brief Stemming / Lemmatization (Grundformreduktion).
-   * @param word Word to stem.
-   * @param language ISO language code.
-   * @return Stemmed version of the word.
-   */
-  std::string stem(const std::string& word, const std::string& language = "en");
-
-  /**
-   * @brief Extract named entities from text (Eigennamenerkennung).
-   * @param text Input text.
-   * @param language ISO language code.
-   * @return Vector of Entity structures.
-   */
-  std::vector<Entity> extract_entities(const std::string& text, const std::string& language = "en");
-
-  /**
-   * @brief Extract email addresses using regex.
-   */
-  std::vector<Entity> extract_emails(const std::string& text);
-
-  /**
-   * @brief Extract URLs using regex.
-   */
-  std::vector<Entity> extract_urls(const std::string& text);
-
-  /**
-   * @brief Extract dates using patterns.
-   */
-  std::vector<Entity> extract_dates(const std::string& text);
-
-  // ===== Readability Analysis =====
-
-  /**
-   * @brief Calculate readability metrics including Flesch-Kincaid.
-   * @param text Input text.
-   * @return ReadabilityMetrics structure.
-   */
+  std::vector<Entity> extract_entities(const std::string& text, const std::string& lang = "en");
   ReadabilityMetrics analyze_readability(const std::string& text);
+  SentimentResult analyze_sentiment(const std::string& text, const std::string& lang = "en");
+  ToxicityResult detect_toxicity(const std::string& text, const std::string& lang = "en");
 
-  /**
-   * @brief Flesch Reading Ease score calculation.
-   */
-  float flesch_reading_ease(
-    int word_count,
-    int sentence_count,
-    int syllable_count
-  );
-
-  /**
-   * @brief Flesch-Kincaid Grade Level calculation.
-   */
-  float flesch_kincaid_grade(
-    int word_count,
-    int sentence_count,
-    int syllable_count
-  );
-
-  /**
-   * @brief Count syllables in a word (approximation).
-   */
-  static int count_syllables(const std::string& word);
-
-  // ===== Document Structure Analysis =====
-
-  /**
-   * @brief Analyze document structure and type.
-   */
-  DocumentStructure analyze_structure(const std::string& text);
-
-  /**
-   * @brief Estimate reading time (avg 200 words per minute).
-   */
-  int estimate_reading_time(int word_count);
-
-  /**
-   * @brief Detect document type based on structure.
-   */
-  std::string detect_document_type(const std::string& text);
-
-  // ===== JSON Serialization =====
-
+  // --- Serialization ---
   json corrections_to_json(const std::vector<Correction>& corrections);
   json keywords_to_json(const std::vector<Keyword>& keywords);
   json entities_to_json(const std::vector<Entity>& entities);
   json readability_to_json(const ReadabilityMetrics& metrics);
   json summary_to_json(const SummaryResult& summary);
-  json structure_to_json(const DocumentStructure& structure);
   json sentiment_to_json(const SentimentResult& sentiment);
   json toxicity_to_json(const ToxicityResult& toxicity);
 
 private:
-  // ===== Internal State =====
-  std::vector<std::string> english_stopwords_;
-  std::vector<std::string> german_stopwords_;
-  std::vector<std::string> french_stopwords_;
-  std::vector<std::string> english_dictionary_;
-  std::vector<std::string> german_dictionary_;
-  std::vector<std::string> french_dictionary_;
+  std::shared_ptr<NLPModel> model_;
 
-  // Sentiment Lexicons
-  std::map<std::string, float> positive_words_;
-  std::map<std::string, float> negative_words_;
-  std::vector<std::string> toxic_patterns_;
-
-  // ===== Helpers =====
-  void load_stopwords();
-  void load_dictionary();
-  void load_sentiment_lexicon();
-
+  // Helper Methods
   std::string to_lower(const std::string& str);
   std::string remove_punctuation(const std::string& str);
-  bool is_stopword(const std::string& word, const std::string& language);
-
-  std::vector<std::string> get_stopwords(const std::string& language);
-  float calculate_sentence_score(
-    const std::string& sentence,
-    const std::map<std::string, float>& word_scores
-  );
+  static int count_syllables(const std::string& word);
+  float calculate_sentence_score(const std::string& sentence, const std::map<std::string, float>& word_scores);
+  int estimate_reading_time(int word_count);
+  std::string detect_document_type(const std::string& text);
 };
 
 } // namespace pce::nlp

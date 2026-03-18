@@ -1,6 +1,6 @@
 /**
  * @file nlp_engine.cpp
- * @brief Implementation of the NLPEngine class for multilingual NLP processing.
+ * @brief Implementation of NLPModel and NLPEngine classes for ICALL.
  */
 
 #include "nlp_engine.h"
@@ -15,860 +15,433 @@
 
 namespace pce::nlp {
 
-NLPEngine::NLPEngine() {
-  load_stopwords();
-  load_dictionary();
-  load_sentiment_lexicon();
+// ============ NLPModel Implementation ============
+
+bool NLPModel::load_from(const std::string& base_path) {
+    current_path_ = base_path;
+    if (!current_path_.empty() && current_path_.back() != '/' && current_path_.back() != '\\') {
+#ifdef _WIN32
+        current_path_ += '\\';
+#else
+        current_path_ += '/';
+#endif
+    }
+
+    bool success = true;
+
+    // Load Stopwords
+    success &= load_file_to_vec(current_path_ + "stopwords_en.txt", data_.stopwords["en"]);
+    success &= load_file_to_vec(current_path_ + "stopwords_de.txt", data_.stopwords["de"]);
+    success &= load_file_to_vec(current_path_ + "stopwords_fr.txt", data_.stopwords["fr"]);
+
+    // Load Dictionaries
+    success &= load_file_to_vec(current_path_ + "dictionary_en.txt", data_.dictionaries["en"]);
+    success &= load_file_to_vec(current_path_ + "dictionary_de.txt", data_.dictionaries["de"]);
+    success &= load_file_to_vec(current_path_ + "dictionary_fr.txt", data_.dictionaries["fr"]);
+
+    // Load Sentiment Lexicons
+    success &= load_lexicon_to_map(current_path_ + "sentiment_positive.txt", data_.positive_lexicon);
+    success &= load_lexicon_to_map(current_path_ + "sentiment_negative.txt", data_.negative_lexicon);
+
+    // Load Toxicity Patterns
+    success &= load_file_to_vec(current_path_ + "toxic_words.txt", data_.toxic_patterns);
+
+    // Sync legacy views for backward compatibility
+    en_stopwords_ = data_.stopwords["en"];
+    de_stopwords_ = data_.stopwords["de"];
+    fr_stopwords_ = data_.stopwords["fr"];
+    en_dict_ = data_.dictionaries["en"];
+    de_dict_ = data_.dictionaries["de"];
+    fr_dict_ = data_.dictionaries["fr"];
+    positive_words_ = data_.positive_lexicon;
+    negative_words_ = data_.negative_lexicon;
+    toxic_patterns_ = data_.toxic_patterns;
+
+    is_ready_ = success;
+    return is_ready_;
 }
 
-// ===== Tokenization & Basic Processing =====
+const std::vector<std::string>& NLPModel::get_stopwords(const std::string& lang) const {
+    auto it = data_.stopwords.find(lang);
+    if (it != data_.stopwords.end()) {
+        return it->second;
+    }
+    static const std::vector<std::string> empty;
+    return empty;
+}
+
+const std::vector<std::string>& NLPModel::get_dictionary(const std::string& lang) const {
+    auto it = data_.dictionaries.find(lang);
+    if (it != data_.dictionaries.end()) {
+        return it->second;
+    }
+    static const std::vector<std::string> empty;
+    return empty;
+}
+
+bool NLPModel::load_file_to_vec(const std::string& path, std::vector<std::string>& target) {
+    std::ifstream file(path);
+    if (!file.is_open()) return false;
+    target.clear();
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line[0] != '#') {
+            target.push_back(line);
+        }
+    }
+    return true;
+}
+
+bool NLPModel::load_lexicon_to_map(const std::string& path, std::map<std::string, float>& target) {
+    std::ifstream file(path);
+    if (!file.is_open()) return false;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line[0] != '#') {
+            target[line] = 1.0f; // Default intensity
+        }
+    }
+    return true;
+}
+
+// ============ NLPEngine Implementation ============
+
+NLPEngine::NLPEngine(std::shared_ptr<NLPModel> model) : model_(model) {
+    if (!model_ || !model_->is_ready()) {
+        // In production, consider throwing an exception or logging
+    }
+}
 
 LanguageProfile NLPEngine::detect_language(const std::string& text) {
-  LanguageProfile profile;
-  profile.language = "en";
-  profile.confidence = 0.0f;
+    LanguageProfile profile{.language = "en", .confidence = 0.0f};
+    if (text.empty() || !model_) return profile;
 
-  if (text.empty()) return profile;
+    std::map<std::string, int> scores = {{"en", 0}, {"de", 0}, {"fr", 0}};
+    auto tokens = tokenize(text);
 
-  std::map<std::string, int> lang_scores;
-  lang_scores["en"] = 0;
-  lang_scores["de"] = 0;
-  lang_scores["fr"] = 0;
-
-  auto tokens = tokenize(to_lower(text));
-  for (const auto& token : tokens) {
-    if (std::find(english_stopwords_.begin(), english_stopwords_.end(), token) != english_stopwords_.end()) lang_scores["en"]++;
-    if (std::find(german_stopwords_.begin(), german_stopwords_.end(), token) != german_stopwords_.end()) lang_scores["de"]++;
-    if (std::find(french_stopwords_.begin(), french_stopwords_.end(), token) != french_stopwords_.end()) lang_scores["fr"]++;
-  }
-
-  std::string best_lang = "en";
-  int max_score = -1;
-  int total_hits = 0;
-
-  for (auto const& [lang, score] : lang_scores) {
-    total_hits += score;
-    if (score > max_score) {
-      max_score = score;
-      best_lang = lang;
+    for (const auto& token : tokens) {
+        if (std::find(model_->get_stopwords("en").begin(), model_->get_stopwords("en").end(), token) != model_->get_stopwords("en").end()) scores["en"]++;
+        if (std::find(model_->get_stopwords("de").begin(), model_->get_stopwords("de").end(), token) != model_->get_stopwords("de").end()) scores["de"]++;
+        if (std::find(model_->get_stopwords("fr").begin(), model_->get_stopwords("fr").end(), token) != model_->get_stopwords("fr").end()) scores["fr"]++;
     }
-  }
 
-  profile.language = (total_hits > 0) ? best_lang : "en";
-  profile.confidence = (total_hits > 0) ? (float)max_score / total_hits : 0.5f;
+    std::string best_lang = "en";
+    int max_hits = -1;
+    int total_hits = 0;
 
-  return profile;
-}
-
-SentimentResult NLPEngine::analyze_sentiment(const std::string& text, const std::string& language) {
-  SentimentResult result{.score = 0.0f, .label = "neutral", .confidence = 0.0f};
-  if (text.empty()) return result;
-
-  auto tokens = tokenize(to_lower(text));
-  int pos_hits = 0;
-  int neg_hits = 0;
-
-  for (const auto& token : tokens) {
-    if (positive_words_.count(token)) pos_hits++;
-    if (negative_words_.count(token)) neg_hits++;
-  }
-
-  int total_hits = pos_hits + neg_hits;
-  if (total_hits > 0) {
-    result.score = (float)(pos_hits - neg_hits) / total_hits;
-    if (result.score > 0.1f) result.label = "positive";
-    else if (result.score < -0.1f) result.label = "negative";
-    result.confidence = std::min(1.0f, (float)total_hits / tokens.size() * 2.0f);
-  }
-
-  return result;
-}
-
-ToxicityResult NLPEngine::detect_toxicity(const std::string& text, const std::string& language) {
-  ToxicityResult result{.is_toxic = false, .score = 0.0f, .category = "none"};
-  std::string lower_text = to_lower(text);
-
-  for (const auto& pattern : toxic_patterns_) {
-    if (lower_text.find(pattern) != std::string::npos) {
-      result.is_toxic = true;
-      result.triggers.push_back(pattern);
-      result.score = std::min(1.0f, result.score + 0.4f);
-      result.category = "offensive";
+    for (auto const& [lang, count] : scores) {
+        total_hits += count;
+        if (count > max_hits) {
+            max_hits = count;
+            best_lang = lang;
+        }
     }
-  }
 
-  return result;
+    profile.language = (total_hits > 0) ? best_lang : "en";
+    profile.confidence = (total_hits > 0) ? (float)max_hits / total_hits : 0.5f;
+    return profile;
 }
-
-// ============ Tokenization & Basic Processing ============
 
 std::vector<std::string> NLPEngine::tokenize(const std::string& text) {
-  std::vector<std::string> tokens;
-  std::istringstream iss(text);
-  std::string word;
-
-  while (iss >> word) {
-    // Basic cleaning
-    std::string clean = to_lower(word);
-    clean.erase(std::remove_if(clean.begin(), clean.end(), [](unsigned char c) {
-      return std::ispunct(c);
-    }), clean.end());
-
-    if (!clean.empty()) {
-      tokens.push_back(clean);
+    std::vector<std::string> tokens;
+    std::istringstream iss(text);
+    std::string word;
+    while (iss >> word) {
+        std::string clean = to_lower(word);
+        clean.erase(std::remove_if(clean.begin(), clean.end(), [](unsigned char c) { return std::ispunct(c); }), clean.end());
+        if (!clean.empty()) tokens.push_back(clean);
     }
-  }
-
-  return tokens;
+    return tokens;
 }
 
 std::vector<std::string> NLPEngine::split_sentences(const std::string& text) {
-  std::vector<std::string> sentences;
-  std::string sentence;
-  bool in_quote = false;
-
-  for (size_t i = 0; i < text.length(); ++i) {
-    char c = text[i];
-    sentence += c;
-
-    if (c == '"' || c == '\'') in_quote = !in_quote;
-
-    if (!in_quote && (c == '.' || c == '!' || c == '?')) {
-      // Check if next char is space or end of string
-      if (i + 1 == text.length() || std::isspace(text[i + 1])) {
-        // Trim leading space
-        size_t first = sentence.find_first_not_of(' ');
-        if (first != std::string::npos) {
-          sentences.push_back(sentence.substr(first));
+    std::vector<std::string> sentences;
+    std::string current;
+    bool in_quote = false;
+    for (size_t i = 0; i < text.length(); ++i) {
+        char c = text[i];
+        current += c;
+        if (c == '"' || c == '\'') in_quote = !in_quote;
+        if (!in_quote && (c == '.' || c == '!' || c == '?')) {
+            if (i + 1 == text.length() || std::isspace(text[i + 1])) {
+                size_t first = current.find_first_not_of(" \t\n\r");
+                if (first != std::string::npos) sentences.push_back(current.substr(first));
+                current.clear();
+            }
         }
-        sentence.clear();
-      }
     }
-  }
-
-  if (!sentence.empty()) {
-    size_t first = sentence.find_first_not_of(' ');
-    if (first != std::string::npos) {
-      sentences.push_back(sentence.substr(first));
+    if (!current.empty()) {
+        size_t first = current.find_first_not_of(" \t\n\r");
+        if (first != std::string::npos) sentences.push_back(current.substr(first));
     }
-  }
-
-  return sentences;
+    return sentences;
 }
 
-std::vector<std::string> NLPEngine::remove_stopwords(
-  const std::vector<std::string>& tokens,
-  const std::string& language
-) {
-  std::vector<std::string> filtered;
-  auto stopwords = get_stopwords(language);
-
-  std::unordered_set<std::string> stop_set(stopwords.begin(), stopwords.end());
-
-  for (const auto& token : tokens) {
-    if (stop_set.find(token) == stop_set.end()) {
-      filtered.push_back(token);
+std::vector<std::string> NLPEngine::remove_stopwords(const std::vector<std::string>& tokens, const std::string& lang) {
+    if (!model_) return tokens;
+    const auto& stopwords = model_->get_stopwords(lang);
+    std::unordered_set<std::string> stop_set(stopwords.begin(), stopwords.end());
+    std::vector<std::string> filtered;
+    for (const auto& t : tokens) {
+        if (stop_set.find(t) == stop_set.end()) filtered.push_back(t);
     }
-  }
-
-  return filtered;
+    return filtered;
 }
 
 std::string NLPEngine::normalize(const std::string& text) {
-  std::string normalized = to_lower(text);
-  normalized = remove_punctuation(normalized);
-  return normalized;
+    return remove_punctuation(to_lower(text));
 }
 
-// ============ Spell Checking ============
+std::vector<Correction> NLPEngine::spell_check(const std::string& text, const std::string& lang) {
+    std::vector<Correction> corrections;
+    if (!model_) return corrections;
+    auto tokens = tokenize(text);
+    const auto& dict = model_->get_dictionary(lang);
+    std::unordered_set<std::string> dict_set(dict.begin(), dict.end());
 
-std::vector<Correction> NLPEngine::spell_check(
-  const std::string& text,
-  const std::string& language
-) {
-  std::vector<Correction> corrections;
-  auto tokens = tokenize(text);
-
-  const std::vector<std::string>* current_dict = &english_dictionary_;
-  if (language == "de") current_dict = &german_dictionary_;
-  else if (language == "fr") current_dict = &french_dictionary_;
-
-  std::unordered_set<std::string> dict_set(
-    current_dict->begin(),
-    current_dict->end()
-  );
-
-  for (const auto& token : tokens) {
-    // Check if word is in dictionary
-    if (dict_set.find(token) == dict_set.end() && token.length() > 1) {
-      auto suggestions = get_spelling_suggestions(token, 2, language);
-
-      if (!suggestions.empty()) {
-        Correction correction{
-          .original = token,
-          .suggested = suggestions[0],
-          .confidence = 1.0f - (levenshtein_distance(token, suggestions[0]) * 0.1f),
-          .reason = "Not in dictionary"
-        };
-        corrections.push_back(correction);
-      }
+    for (const auto& token : tokens) {
+        if (token.length() > 1 && dict_set.find(token) == dict_set.end()) {
+            auto suggestions = get_spelling_suggestions(token, 2, lang);
+            if (!suggestions.empty()) {
+                corrections.push_back({token, suggestions[0], 0.8f, "Not in dictionary"});
+            }
+        }
     }
-  }
-
-  return corrections;
+    return corrections;
 }
 
-std::vector<std::string> NLPEngine::get_spelling_suggestions(
-  const std::string& word,
-  int max_distance,
-  const std::string& language
-) {
-  std::vector<std::pair<std::string, int>> candidates;
+std::vector<std::string> NLPEngine::get_spelling_suggestions(const std::string& word, int max_dist, const std::string& lang) {
+    std::vector<std::string> suggestions;
+    if (!model_) return suggestions;
+    std::vector<std::pair<std::string, int>> candidates;
+    const auto& dict = model_->get_dictionary(lang);
 
-  const std::vector<std::string>* current_dict = &english_dictionary_;
-  if (language == "de") current_dict = &german_dictionary_;
-  else if (language == "fr") current_dict = &french_dictionary_;
-
-  for (const auto& dict_word : *current_dict) {
-    int distance = levenshtein_distance(word, dict_word);
-    if (distance <= max_distance && distance > 0) {
-      candidates.push_back({dict_word, distance});
+    for (const auto& dw : dict) {
+        int d = levenshtein_distance(word, dw);
+        if (d <= max_dist) candidates.push_back({dw, d});
     }
-  }
-
-  // Sort by distance (closest first)
-  std::sort(candidates.begin(), candidates.end(),
-            [](const auto& a, const auto& b) { return a.second < b.second; });
-
-  std::vector<std::string> suggestions;
-  for (size_t i = 0; i < std::min(size_t(3), candidates.size()); ++i) {
-    suggestions.push_back(candidates[i].first);
-  }
-
-  return suggestions;
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
+    for (size_t i = 0; i < std::min(size_t(3), candidates.size()); ++i) suggestions.push_back(candidates[i].first);
+    return suggestions;
 }
 
 int NLPEngine::levenshtein_distance(const std::string& s1, const std::string& s2) {
-  size_t len1 = s1.length();
-  size_t len2 = s2.length();
-  std::vector<std::vector<int>> d(len1 + 1, std::vector<int>(len2 + 1));
-
-  for (size_t i = 0; i <= len1; ++i) d[i][0] = i;
-  for (size_t j = 0; j <= len2; ++j) d[0][j] = j;
-
-  for (size_t i = 1; i <= len1; ++i) {
-    for (size_t j = 1; j <= len2; ++j) {
-      int cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
-      d[i][j] = std::min({
-        d[i - 1][j] + 1,      // deletion
-        d[i][j - 1] + 1,      // insertion
-        d[i - 1][j - 1] + cost // substitution
-      });
+    size_t n = s1.length(), m = s2.length();
+    std::vector<std::vector<int>> d(n + 1, std::vector<int>(m + 1));
+    for (size_t i = 0; i <= n; ++i) d[i][0] = i;
+    for (size_t j = 0; j <= m; ++j) d[0][j] = j;
+    for (size_t i = 1; i <= n; ++i) {
+        for (size_t j = 1; j <= m; ++j) {
+            int cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
+            d[i][j] = std::min({d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost});
+        }
     }
-  }
-
-  return d[len1][len2];
+    return d[n][m];
 }
 
-// ============ Summarization ============
-
 SummaryResult NLPEngine::summarize(const std::string& text, float ratio) {
-  auto sentences = split_sentences(text);
-  auto tfidf = calculate_tfidf(text);
+    auto sentences = split_sentences(text);
+    auto tfidf = calculate_tfidf(text);
+    std::vector<std::pair<size_t, float>> scores;
+    for (size_t i = 0; i < sentences.size(); ++i) scores.push_back({i, calculate_sentence_score(sentences[i], tfidf)});
 
-  // Score sentences based on TF-IDF of their words
-  std::vector<std::pair<size_t, float>> sentence_scores;
-  for (size_t i = 0; i < sentences.size(); ++i) {
-    float score = calculate_sentence_score(sentences[i], tfidf);
-    sentence_scores.push_back({i, score});
-  }
+    std::sort(scores.begin(), scores.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    size_t count = std::max(size_t(1), size_t(sentences.size() * ratio));
+    std::vector<size_t> selected;
+    for (size_t i = 0; i < std::min(count, scores.size()); ++i) selected.push_back(scores[i].first);
+    std::sort(selected.begin(), selected.end());
 
-  // Sort by score descending
-  std::sort(sentence_scores.begin(), sentence_scores.end(),
-            [](const auto& a, const auto& b) { return a.second > b.second; });
-
-  size_t num_sentences = std::max(size_t(1), size_t(sentences.size() * ratio));
-
-  // Select top N and sort by original order
-  std::vector<size_t> selected;
-  for (size_t i = 0; i < std::min(num_sentences, sentence_scores.size()); ++i) {
-    selected.push_back(sentence_scores[i].first);
-  }
-  std::sort(selected.begin(), selected.end());
-
-  std::string summary;
-  for (auto idx : selected) {
-    summary += sentences[idx] + " ";
-  }
-
-  return SummaryResult{
-    .summary = summary,
-    .selected_sentences = selected,
-    .ratio = ratio,
-    .original_length = (int)text.length(),
-    .summary_length = (int)summary.length()
-  };
+    std::string summary;
+    for (auto idx : selected) summary += sentences[idx] + " ";
+    return {summary, selected, ratio, (int)text.length(), (int)summary.length()};
 }
 
 std::map<std::string, float> NLPEngine::calculate_tfidf(const std::string& text) {
-  auto sentences = split_sentences(text);
-  auto tokens = tokenize(text);
-  auto filtered = remove_stopwords(tokens);
+    auto sentences = split_sentences(text);
+    auto tokens = tokenize(text);
+    auto filtered = remove_stopwords(tokens);
+    std::unordered_map<std::string, int> term_counts;
+    for (const auto& t : filtered) term_counts[t]++;
 
-  // Term frequency in doc
-  std::unordered_map<std::string, int> term_count;
-  for (const auto& t : filtered) {
-    term_count[t]++;
-  }
-
-  std::map<std::string, float> tfidf;
-  int total_terms = filtered.size();
-  int total_sentences = sentences.size();
-
-  for (const auto& [term, count] : term_count) {
-    float tf = (float)count / total_terms;
-    // Simple IDF: in how many sentences does it appear
-    int doc_freq = 0;
-    for (const auto& s : sentences) {
-      if (to_lower(s).find(term) != std::string::npos) doc_freq++;
+    std::map<std::string, float> tfidf;
+    for (const auto& [term, count] : term_counts) {
+        float tf = (float)count / filtered.size();
+        int df = 0;
+        for (const auto& s : sentences) if (to_lower(s).find(term) != std::string::npos) df++;
+        tfidf[term] = tf * std::log((float)sentences.size() / (1 + df));
     }
-    float idf = std::log((float)total_sentences / (1 + doc_freq));
-    tfidf[term] = tf * idf;
-  }
-
-  return tfidf;
+    return tfidf;
 }
 
-// ============ Keyword Extraction ============
-
-std::vector<Keyword> NLPEngine::extract_keywords(
-  const std::string& text,
-  int max_keywords,
-  const std::string& language
-) {
-  auto tokens = tokenize(text);
-  auto filtered = remove_stopwords(tokens, language);
-  auto tf = calculate_term_frequency(filtered);
-  auto tfidf = calculate_tfidf(text);
-
-  std::vector<Keyword> keywords;
-  for (const auto& [term, score] : tfidf) {
-    Keyword kw{
-      .term = term,
-      .frequency = tf[term],
-      .tfidf_score = score,
-      .pos = "" // We'll add POS tagging later
-    };
-    keywords.push_back(kw);
-  }
-
-  std::sort(keywords.begin(), keywords.end(),
-            [](const auto& a, const auto& b) { return a.tfidf_score > b.tfidf_score; });
-
-  if (keywords.size() > (size_t)max_keywords) {
-    keywords.resize(max_keywords);
-  }
-
-  return keywords;
+std::vector<Keyword> NLPEngine::extract_keywords(const std::string& text, int max_keywords, const std::string& lang) {
+    auto tfidf = calculate_tfidf(text);
+    std::vector<Keyword> keywords;
+    for (const auto& [term, score] : tfidf) keywords.push_back({term, 0.0f, score, ""});
+    std::sort(keywords.begin(), keywords.end(), [](const auto& a, const auto& b) { return a.tfidf_score > b.tfidf_score; });
+    if (keywords.size() > (size_t)max_keywords) keywords.resize(max_keywords);
+    return keywords;
 }
 
-std::vector<std::string> NLPEngine::extract_terminology(
-  const std::string& text,
-  const std::string& language
-) {
-  // Simple N-gram terminology extraction (Bigrams/Trigrams)
-  std::vector<std::string> terms;
-  auto tokens = tokenize(text);
-  if (tokens.size() < 2) return terms;
-
-  for (size_t i = 0; i < tokens.size() - 1; ++i) {
-    // Basic heuristic: two capitalized words or specific patterns
-    if (std::isupper(tokens[i][0]) && std::isupper(tokens[i+1][0])) {
-      terms.push_back(tokens[i] + " " + tokens[i+1]);
+std::vector<std::string> NLPEngine::extract_terminology(const std::string& text, const std::string& lang) {
+    std::vector<std::string> terms;
+    auto tokens = tokenize(text);
+    for (size_t i = 0; i < tokens.size() - 1; ++i) {
+        if (std::isupper(tokens[i][0]) && std::isupper(tokens[i+1][0])) terms.push_back(tokens[i] + " " + tokens[i+1]);
     }
-  }
-  return terms;
+    return terms;
 }
 
-std::map<std::string, float> NLPEngine::calculate_term_frequency(
-  const std::vector<std::string>& tokens
-) {
-  std::map<std::string, float> tf;
-  int total = tokens.size();
-  if (total == 0) return tf;
+std::vector<std::pair<std::string, std::string>> NLPEngine::pos_tag(const std::vector<std::string>& tokens, const std::string& lang) {
+    std::vector<std::pair<std::string, std::string>> tagged;
+    if (!model_) return tagged;
+    const auto& stops = model_->get_stopwords(lang);
+    std::unordered_set<std::string> stop_set(stops.begin(), stops.end());
 
-  std::unordered_map<std::string, int> counts;
-  for (const auto& t : tokens) counts[t]++;
-
-  for (const auto& [term, count] : counts) {
-    tf[term] = (float)count / total;
-  }
-
-  return tf;
-}
-
-// ============ Entity Extraction ============
-
-std::vector<Entity> NLPEngine::extract_entities(const std::string& text, const std::string& language) {
-  std::vector<Entity> entities;
-
-  // Pattern-based
-  auto emails = extract_emails(text);
-  auto urls = extract_urls(text);
-  auto dates = extract_dates(text);
-
-  entities.insert(entities.end(), emails.begin(), emails.end());
-  entities.insert(entities.end(), urls.begin(), urls.end());
-  entities.insert(entities.end(), dates.begin(), dates.end());
-
-  // Heuristic for Proper Names (Eigennamenerkennung)
-  auto tokens = tokenize(text);
-  for (size_t i = 1; i < tokens.size(); ++i) {
-    if (tokens[i].length() > 2 && std::isupper(tokens[i][0])) {
-      // Basic check: if capitalized but not at start of sentence, likely a Proper Noun
-      Entity name;
-      name.text = tokens[i];
-      name.type = "proper_noun";
-      name.confidence = 0.6f;
-      entities.push_back(name);
+    for (const auto& t : tokens) {
+        std::string tag = "NN";
+        if (stop_set.count(to_lower(t))) tag = "DET";
+        else if (t.length() > 3 && t.substr(t.length() - 2) == "ly") tag = "ADV";
+        tagged.push_back({t, tag});
     }
-  }
-
-  return entities;
+    return tagged;
 }
 
-std::vector<std::pair<std::string, std::string>> NLPEngine::pos_tag(
-  const std::vector<std::string>& tokens,
-  const std::string& language
-) {
-  std::vector<std::pair<std::string, std::string>> tagged;
-  for (const auto& token : tokens) {
-    std::string tag = "NN"; // Default Noun
-
-    // Heuristics for ICALL
-    if (is_stopword(to_lower(token), language)) tag = "DET";
-    else if (token.length() > 3 && (token.substr(token.length()-2) == "ly")) tag = "ADV";
-    else if (token.length() > 3 && (token.substr(token.length()-3) == "ing")) tag = "VBG";
-
-    tagged.push_back({token, tag});
-  }
-  return tagged;
+std::string NLPEngine::stem(const std::string& word, const std::string& lang) {
+    std::string s = to_lower(word);
+    if (s.length() <= 3) return s;
+    if (lang == "en" && s.back() == 's') return s.substr(0, s.length() - 1);
+    if (lang == "de" && s.size() > 5 && s.substr(s.size()-2) == "en") return s.substr(0, s.size()-2);
+    return s;
 }
 
-std::string NLPEngine::stem(const std::string& word, const std::string& language) {
-  std::string s = to_lower(word);
-  if (s.length() <= 3) return s;
-
-  // Simple S-Suffix stripping (Grundformreduktion / Stemming)
-  if (language == "en") {
-    if (s.back() == 's') {
-      if (s.size() > 4 && s.substr(s.size()-3) == "ies") return s.substr(0, s.size()-3) + "y";
-      return s.substr(0, s.size()-1);
+std::vector<Entity> NLPEngine::extract_entities(const std::string& text, const std::string& lang) {
+    std::vector<Entity> entities;
+    std::regex email_regex(R"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})");
+    std::smatch match;
+    std::string::const_iterator search_start(text.cbegin());
+    while (std::regex_search(search_start, text.cend(), match, email_regex)) {
+        entities.push_back({match[0], "email", (size_t)std::distance(text.cbegin(), match[0].first), 0.95f});
+        search_start = match.suffix().first;
     }
-  } else if (language == "de") {
-    // Minimal German stemming (removing 'en', 'e', 'er')
-    if (s.size() > 5 && s.substr(s.size()-2) == "en") return s.substr(0, s.size()-2);
-  }
-
-  return s;
+    return entities;
 }
-
-std::vector<Entity> NLPEngine::extract_emails(const std::string& text) {
-  std::vector<Entity> emails;
-  std::regex email_regex(R"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})");
-  std::smatch match;
-
-  std::string::const_iterator search_start(text.cbegin());
-  while (std::regex_search(search_start, text.cend(), match, email_regex)) {
-    Entity email{
-      .text = match[0],
-      .type = "email",
-      .position = (size_t)std::distance(text.cbegin(), match[0].first),
-      .confidence = 0.95f
-    };
-    emails.push_back(email);
-    search_start = match.suffix().first;
-  }
-  return emails;
-}
-
-std::vector<Entity> NLPEngine::extract_urls(const std::string& text) {
-  std::vector<Entity> urls;
-  std::regex url_regex(R"(https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*))");
-  std::smatch match;
-
-  std::string::const_iterator search_start(text.cbegin());
-  while (std::regex_search(search_start, text.cend(), match, url_regex)) {
-    Entity url{
-      .text = match[0],
-      .type = "url",
-      .position = (size_t)std::distance(text.cbegin(), match[0].first),
-      .confidence = 0.95f
-    };
-    urls.push_back(url);
-    search_start = match.suffix().first;
-  }
-  return urls;
-}
-
-std::vector<Entity> NLPEngine::extract_dates(const std::string& text) {
-  std::vector<Entity> dates;
-  // Simplified date regex
-  std::regex iso_regex(R"(\d{4}-\d{2}-\d{2})");
-  std::smatch match;
-
-  std::string::const_iterator search_start(text.cbegin());
-  while (std::regex_search(search_start, text.cend(), match, iso_regex)) {
-    Entity date{
-      .text = match[0],
-      .type = "date",
-      .position = (size_t)std::distance(text.cbegin(), match[0].first),
-      .confidence = 0.9f
-    };
-    dates.push_back(date);
-    search_start = match.suffix().first;
-  }
-  return dates;
-}
-
-// ============ Readability Analysis ============
 
 ReadabilityMetrics NLPEngine::analyze_readability(const std::string& text) {
-  auto sentences = split_sentences(text);
-  auto tokens = tokenize(text);
+    auto sentences = split_sentences(text);
+    auto tokens = tokenize(text);
+    int words = tokens.size(), sents = std::max(1, (int)sentences.size()), syllables = 0;
+    for (const auto& t : tokens) syllables += count_syllables(t);
 
-  int word_count = tokens.size();
-  int sentence_count = std::max(1, (int)sentences.size());
+    float score = 206.835f - 1.015f * ((float)words / sents) - 84.6f * ((float)syllables / words);
+    float grade = 0.39f * ((float)words / sents) + 11.8f * ((float)syllables / words) - 15.59f;
 
-  int syllable_count = 0;
-  for (const auto& token : tokens) {
-    syllable_count += count_syllables(token);
-  }
-
-  float fre = flesch_reading_ease(word_count, sentence_count, syllable_count);
-  float fkg = flesch_kincaid_grade(word_count, sentence_count, syllable_count);
-
-  std::string complexity = "medium";
-  if (fre > 70) complexity = "easy";
-  else if (fre < 40) complexity = "hard";
-
-  float avg_sentence_length = (float)word_count / sentence_count;
-
-  std::vector<std::string> suggestions;
-  if (avg_sentence_length > 20) suggestions.push_back("Shorten your sentences.");
-  if (complexity == "hard") suggestions.push_back("Use simpler vocabulary.");
-
-  return ReadabilityMetrics{
-    .flesch_kincaid_grade = fkg,
-    .readability_score = fre,
-    .complexity = complexity,
-    .suggestions = suggestions,
-    .word_count = word_count,
-    .sentence_count = sentence_count,
-    .avg_sentence_length = avg_sentence_length
-  };
+    return {grade, score, (score > 70 ? "easy" : (score < 40 ? "hard" : "medium")), {}, words, sents, (float)words / sents};
 }
 
-float NLPEngine::flesch_reading_ease(
-  int word_count,
-  int sentence_count,
-  int syllable_count
-) {
-  if (word_count == 0 || sentence_count == 0) return 0.0f;
-  float score = 206.835f - 1.015f * ((float)word_count / sentence_count) -
-                84.6f * ((float)syllable_count / word_count);
-  return std::max(0.0f, std::min(100.0f, score));
-}
-
-float NLPEngine::flesch_kincaid_grade(
-  int word_count,
-  int sentence_count,
-  int syllable_count
-) {
-  if (word_count == 0 || sentence_count == 0) return 0.0f;
-  float grade = 0.39f * ((float)word_count / sentence_count) +
-                11.8f * ((float)syllable_count / word_count) - 15.59f;
-  return std::max(0.0f, grade);
-}
-
-int NLPEngine::count_syllables(const std::string& word) {
-  std::string w(word);
-  std::transform(w.begin(), w.end(), w.begin(), [](unsigned char c) { return std::tolower(c); });
-  int count = 0;
-  bool previous_was_vowel = false;
-
-  for (char c : w) {
-    bool is_vowel = (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' || c == 'y');
-
-    if (is_vowel && !previous_was_vowel) {
-      count++;
+SentimentResult NLPEngine::analyze_sentiment(const std::string& text, const std::string& lang) {
+    if (!model_) return {0.0f, "neutral", 0.0f};
+    auto tokens = tokenize(text);
+    int pos = 0, neg = 0;
+    const auto& pos_lex = model_->get_positive_lexicon();
+    const auto& neg_lex = model_->get_negative_lexicon();
+    for (const auto& t : tokens) {
+        if (pos_lex.count(t)) pos++;
+        if (neg_lex.count(t)) neg++;
     }
-    previous_was_vowel = is_vowel;
-  }
-
-  // Adjust for silent e at the end
-  if (w.length() > 2 && w.back() == 'e') {
-    count--;
-  }
-
-  return std::max(1, count);
+    int total = pos + neg;
+    if (total == 0) return {0.0f, "neutral", 0.0f};
+    float score = (float)(pos - neg) / total;
+    return {score, (score > 0.1f ? "positive" : (score < -0.1f ? "negative" : "neutral")), 0.8f};
 }
 
-// ============ Document Structure Analysis ============
-
-DocumentStructure NLPEngine::analyze_structure(const std::string& text) {
-  auto tokens = tokenize(text);
-  int word_count = tokens.size();
-  int reading_time = estimate_reading_time(word_count);
-  std::string doc_type = detect_document_type(text);
-
-  return DocumentStructure{
-    .doc_type = doc_type,
-    .sections = {},
-    .headings = {},
-    .estimated_reading_time = reading_time,
-    .estimated_complexity = 0.0f
-  };
-}
-
-int NLPEngine::estimate_reading_time(int word_count) {
-  const int avg_wpm = 200; // Average words per minute
-  return std::max(1, word_count / avg_wpm);
-}
-
-std::string NLPEngine::detect_document_type(const std::string& text) {
-  std::string lower_text = to_lower(text);
-
-  if (lower_text.find("dear ") != std::string::npos || lower_text.find("sincerely,") != std::string::npos)
-    return "letter";
-  if (lower_text.find("abstract") != std::string::npos || lower_text.find("references") != std::string::npos)
-    return "paper";
-  if (lower_text.find("report") != std::string::npos)
-    return "report";
-
-  return "article";
-}
-
-// ============ JSON Serialization ============
-
-json NLPEngine::corrections_to_json(const std::vector<Correction>& corrections) {
-  json j = json::array();
-  for (const auto& c : corrections) {
-    j.push_back({
-      {"original", c.original},
-      {"suggested", c.suggested},
-      {"confidence", c.confidence},
-      {"reason", c.reason}
-    });
-  }
-  return j;
-}
-
-json NLPEngine::keywords_to_json(const std::vector<Keyword>& keywords) {
-  json j = json::array();
-  for (const auto& k : keywords) {
-    j.push_back({
-      {"term", k.term},
-      {"frequency", k.frequency},
-      {"tfidf_score", k.tfidf_score},
-      {"pos", k.pos}
-    });
-  }
-  return j;
-}
-
-json NLPEngine::entities_to_json(const std::vector<Entity>& entities) {
-  json j = json::array();
-  for (const auto& e : entities) {
-    j.push_back({
-      {"text", e.text},
-      {"type", e.type},
-      {"position", e.position},
-      {"confidence", e.confidence}
-    });
-  }
-  return j;
-}
-
-json NLPEngine::readability_to_json(const ReadabilityMetrics& metrics) {
-  return json{
-    {"flesch_kincaid_grade", metrics.flesch_kincaid_grade},
-    {"readability_score", metrics.readability_score},
-    {"complexity", metrics.complexity},
-    {"suggestions", metrics.suggestions},
-    {"word_count", metrics.word_count},
-    {"sentence_count", metrics.sentence_count},
-    {"avg_sentence_length", metrics.avg_sentence_length}
-  };
-}
-
-json NLPEngine::sentiment_to_json(const SentimentResult& sentiment) {
-  return json{
-    {"score", sentiment.score},
-    {"label", sentiment.label},
-    {"confidence", sentiment.confidence}
-  };
-}
-
-json NLPEngine::toxicity_to_json(const ToxicityResult& toxicity) {
-  return json{
-    {"is_toxic", toxicity.is_toxic},
-    {"score", toxicity.score},
-    {"triggers", toxicity.triggers},
-    {"category", toxicity.category}
-  };
-}
-
-json NLPEngine::summary_to_json(const SummaryResult& summary) {
-  return json{
-    {"summary", summary.summary},
-    {"selected_sentences", summary.selected_sentences},
-    {"ratio", summary.ratio},
-    {"original_length", summary.original_length},
-    {"summary_length", summary.summary_length}
-  };
-}
-
-json NLPEngine::structure_to_json(const DocumentStructure& structure) {
-  return json{
-    {"doc_type", structure.doc_type},
-    {"sections", structure.sections},
-    {"headings", structure.headings},
-    {"reading_time", structure.estimated_reading_time},
-    {"complexity", structure.estimated_complexity}
-  };
-}
-
-// ============ Private Helpers ============
-
-void NLPEngine::load_stopwords() {
-  auto load_file = [](const std::string& path, std::vector<std::string>& target) {
-    std::ifstream file(path);
-    if (file.is_open()) {
-      std::string line;
-      while (std::getline(file, line)) {
-        if (!line.empty()) target.push_back(line);
-      }
-      return true;
+ToxicityResult NLPEngine::detect_toxicity(const std::string& text, const std::string& lang) {
+    ToxicityResult res{false, 0.0f, {}, "none"};
+    if (!model_) return res;
+    std::string lower = to_lower(text);
+    for (const auto& p : model_->get_toxic_patterns()) {
+        if (lower.find(p) != std::string::npos) {
+            res.is_toxic = true;
+            res.triggers.push_back(p);
+            res.score = std::min(1.0f, res.score + 0.4f);
+            res.category = "offensive";
+        }
     }
-    return false;
-  };
-
-  // Try loading from data directory first
-  if (!load_file("data/stopwords_en.txt", english_stopwords_)) {
-    english_stopwords_ = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "is", "was"};
-  }
-
-  if (!load_file("data/stopwords_de.txt", german_stopwords_)) {
-    german_stopwords_ = {"der", "die", "das", "und", "in", "von", "zu", "mit", "ist", "im"};
-  }
-
-  if (!load_file("data/stopwords_fr.txt", french_stopwords_)) {
-    french_stopwords_ = {"le", "de", "un", "et", "a", "en", "que", "ne", "pas", "ce"};
-  }
+    return res;
 }
 
-void NLPEngine::load_sentiment_lexicon() {
-  auto load_words = [](const std::string& path, std::vector<std::string>& target) {
-    std::ifstream file(path);
-    if (file.is_open()) {
-      std::string line;
-      while (std::getline(file, line)) {
-        if (!line.empty() && line[0] != '#') target.push_back(line);
-      }
-      return true;
-    }
-    return false;
-  };
-
-  std::vector<std::string> pos_list, neg_list;
-
-  if (load_words("data/sentiment_positive.txt", pos_list)) {
-    for (const auto& w : pos_list) positive_words_[w] = 1.0f;
-  } else {
-    positive_words_ = {{"good", 1.0f}, {"great", 1.0f}, {"gut", 1.0f}, {"bon", 1.0f}};
-  }
-
-  if (load_words("data/sentiment_negative.txt", neg_list)) {
-    for (const auto& w : neg_list) negative_words_[w] = 1.0f;
-  } else {
-    negative_words_ = {{"bad", 1.0f}, {"terrible", 1.0f}, {"schlecht", 1.0f}, {"mauvais", 1.0f}};
-  }
-
-  if (!load_words("data/toxic_words.txt", toxic_patterns_)) {
-    toxic_patterns_ = {"stupid", "idiot", "hate", "dumm", "hassen", "débile"};
-  }
-}
-
-void NLPEngine::load_dictionary() {
-  auto load_file = [](const std::string& path, std::vector<std::string>& target) {
-    std::ifstream file(path);
-    if (file.is_open()) {
-      std::string line;
-      while (std::getline(file, line)) {
-        if (!line.empty()) target.push_back(line);
-      }
-      return true;
-    }
-    return false;
-  };
-
-  if (!load_file("data/dictionary_en.txt", english_dictionary_)) {
-    english_dictionary_ = {"about", "after", "all", "also", "another", "any", "as", "ask"};
-  }
-
-  if (!load_file("data/dictionary_de.txt", german_dictionary_)) {
-    german_dictionary_ = {"beispiel", "haus", "welt", "sprache", "lernen"};
-  }
-
-  if (!load_file("data/dictionary_fr.txt", french_dictionary_)) {
-    french_dictionary_ = {"exemple", "maison", "monde", "langue", "apprendre"};
-  }
-}
+// --- Internal Helpers ---
 
 std::string NLPEngine::to_lower(const std::string& str) {
-  std::string result = str;
-  std::transform(result.begin(), result.end(), result.begin(),
-                 [](unsigned char c) { return std::tolower(c); });
-  return result;
+    std::string res = str;
+    std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::tolower(c); });
+    return res;
 }
 
 std::string NLPEngine::remove_punctuation(const std::string& str) {
-  std::string result = str;
-  result.erase(std::remove_if(result.begin(), result.end(),
-                              [](unsigned char c) { return std::ispunct(c); }),
-               result.end());
-  return result;
+    std::string res = str;
+    res.erase(std::remove_if(res.begin(), res.end(), [](unsigned char c) { return std::ispunct(c); }), res.end());
+    return res;
 }
 
-bool NLPEngine::is_stopword(const std::string& word, const std::string& language) {
-  auto stopwords = get_stopwords(language);
-  return std::find(stopwords.begin(), stopwords.end(), word) != stopwords.end();
-}
-
-std::vector<std::string> NLPEngine::get_stopwords(const std::string& language) {
-  if (language == "de") return german_stopwords_;
-  if (language == "fr") return french_stopwords_;
-  return english_stopwords_;
-}
-
-float NLPEngine::calculate_sentence_score(
-  const std::string& sentence,
-  const std::map<std::string, float>& word_scores
-) {
-  auto tokens = tokenize(sentence);
-  float score = 0;
-  int count = 0;
-
-  for (const auto& token : tokens) {
-    auto it = word_scores.find(token);
-    if (it != word_scores.end()) {
-      score += it->second;
-      count++;
+int NLPEngine::count_syllables(const std::string& word) {
+    int count = 0;
+    bool last_vowel = false;
+    std::string w = word;
+    std::transform(w.begin(), w.end(), w.begin(), [](unsigned char c) { return std::tolower(c); });
+    for (char c : w) {
+        bool is_vowel = (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' || c == 'y');
+        if (is_vowel && !last_vowel) count++;
+        last_vowel = is_vowel;
     }
-  }
+    if (w.length() > 2 && w.back() == 'e') count--;
+    return std::max(1, count);
+}
 
-  return (count > 0) ? score / count : 0;
+float NLPEngine::calculate_sentence_score(const std::string& sentence, const std::map<std::string, float>& scores) {
+    auto tokens = tokenize(sentence);
+    float sum = 0;
+    int count = 0;
+    for (const auto& t : tokens) {
+        auto it = scores.find(t);
+        if (it != scores.end()) { sum += it->second; count++; }
+    }
+    return count > 0 ? sum / count : 0;
+}
+
+// --- Serialization ---
+
+json NLPEngine::corrections_to_json(const std::vector<Correction>& corrections) {
+    json j = json::array();
+    for (const auto& c : corrections) j.push_back({{"original", c.original}, {"suggested", c.suggested}, {"confidence", c.confidence}, {"reason", c.reason}});
+    return j;
+}
+
+json NLPEngine::keywords_to_json(const std::vector<Keyword>& keywords) {
+    json j = json::array();
+    for (const auto& k : keywords) j.push_back({{"term", k.term}, {"tfidf", k.tfidf_score}});
+    return j;
+}
+
+json NLPEngine::entities_to_json(const std::vector<Entity>& entities) {
+    json j = json::array();
+    for (const auto& e : entities) j.push_back({{"text", e.text}, {"type", e.type}});
+    return j;
+}
+
+json NLPEngine::readability_to_json(const ReadabilityMetrics& m) {
+    return {{"score", m.readability_score}, {"grade", m.flesch_kincaid_grade}, {"complexity", m.complexity}};
+}
+
+json NLPEngine::summary_to_json(const SummaryResult& s) {
+    return {{"summary", s.summary}, {"ratio", s.ratio}};
+}
+
+json NLPEngine::sentiment_to_json(const SentimentResult& s) {
+    return {{"score", s.score}, {"label", s.label}};
+}
+
+json NLPEngine::toxicity_to_json(const ToxicityResult& t) {
+    return {{"is_toxic", t.is_toxic}, {"score", t.score}, {"category", t.category}};
 }
 
 } // namespace pce::nlp
