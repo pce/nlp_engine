@@ -21,13 +21,22 @@ _Eine leichtgewichtige C++23-Bibliothek für mehrsprachige Computerlinguistik, s
 
 ## Quick Start / Schnelleinstieg (C++23)
 
+The library uses a decoupled architecture where the `NLPModel` manages heavy resources (dictionaries, lexicons) and the `NLPEngine` handles the processing logic.
+
 ```cpp
 #include "nlp_engine.h"
+#include <memory>
 
 using namespace pce::nlp;
 
 int main() {
-    NLPEngine engine;
+    // 1. Initialize the Data Model
+    auto model = std::make_shared<NLPModel>();
+    if (!model->load_from("data")) return 1;
+
+    // 2. Initialize the Engine with the Model
+    NLPEngine engine(model);
+
     std::string text = "Das ist ein Beispiel für Grundformreduktion.";
 
     // Language Detection / Spracherkennung
@@ -41,8 +50,8 @@ int main() {
     auto tags = engine.pos_tag(tokens, "de");
 
     // Sentiment & Toxicity / Stimmung & Toxizität
-    auto sentiment = engine.analyze_sentiment(text);
-    auto toxicity = engine.detect_toxicity("You are stupid!");
+    auto sentiment = engine.analyze_sentiment(text, "de");
+    auto toxicity = engine.detect_toxicity("You are stupid!", "en");
 }
 ```
 
