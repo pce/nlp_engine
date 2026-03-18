@@ -1,0 +1,69 @@
+# English Toxic/Offensive
+stupid
+idiot
+dumb
+hate
+hating
+hateful
+moron
+jerk
+bastard
+asshole
+bitch
+fuck
+fucking
+shit
+shitty
+piss
+loser
+pathetic
+useless
+garbage
+trash
+shut up
+kill yourself
+die
+# German Toxic/Offensive
+dumm
+doof
+idiot
+blöd
+blödsinn
+hassen
+hass
+hässlich
+mist
+verdammt
+arsch
+arschloch
+schlampe
+hure
+wixer
+bescheuert
+unfähig
+wertlos
+geh sterben
+halt den mund
+fresse
+# French Toxic/Offensive
+stupide
+idiot
+débile
+bête
+haine
+détester
+merde
+merdique
+con
+connard
+salope
+putain
+chiant
+nul
+nulle
+abruti
+imbécile
+ferme ta gueule
+va te faire
+crève
+enfoiré
