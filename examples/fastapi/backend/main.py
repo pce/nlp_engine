@@ -76,6 +76,21 @@ class ProcessingResponse(BaseModel):
 
 # --- Lifecycle ---
 
+def refresh_markov_models():
+    """Scan the models directory and register found Markov Knowledge Packs"""
+    data_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data"))
+    models_dir = os.path.join(data_path, "models")
+    app.state.available_models = []
+
+    if os.path.exists(models_dir):
+        for model_file in sorted(os.listdir(models_dir)):
+            if model_file.endswith(".json"):
+                model_name = os.path.splitext(model_file)[0]
+                model_path = os.path.join(models_dir, model_file)
+                engine.load_markov_model(model_path, model_name)
+                app.state.available_models.append(model_name)
+                logger.info(f"Registered Markov model: {model_name}")
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize the native NLP engine and load resource dictionaries"""
@@ -90,21 +105,7 @@ async def startup_event():
         logger.info(f"Native NLP Engine initialized with resources from {data_path}")
 
         # Load available Markov models
-        models_dir = os.path.join(data_path, "models")
-        app.state.available_models = []
-        if os.path.exists(models_dir):
-            for model_file in os.listdir(models_dir):
-                if model_file.endswith(".json"):
-                    model_path = os.path.join(models_dir, model_file)
-                    # We can load multiple but for now we register the generic one
-                    # Register the model with its own name as the addon method
-                    model_name = os.path.splitext(model_file)[0]
-                    engine.load_markov_model(model_path, model_name)
-                    logger.info(f"Registered Markov model: {model_name} from {model_file}")
-
-                    # Store model name without extension
-                    model_name = os.path.splitext(model_file)[0]
-                    app.state.available_models.append(model_name)
+        refresh_markov_models()
     except Exception as e:
         logger.error(f"Failed to initialize native engine: {e}")
         # We don't necessarily want to kill the whole server if initialization fails during dev,
@@ -117,6 +118,13 @@ async def shutdown_event():
     if engine:
         engine.shutdown()
         logger.info("Native NLP Engine shut down")
+
+# --- Models for Training ---
+
+class TrainingRequest(BaseModel):
+    category: str
+    text: Optional[str] = None
+    ngram_size: int = 2
 
 # --- Endpoints ---
 
@@ -216,6 +224,62 @@ async def generate_text_stream(
             active_tasks_tracker.pop(task_id, None)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.post("/train-model")
+async def train_model(request: TrainingRequest):
+    """
+    Trigger on-the-fly training for a Markov Knowledge Pack.
+    Saves the new model to disk and hot-reloads it into the engine.
+    """
+    task_id = f"train_{int(time.time() * 1000)}"
+    active_tasks_tracker[task_id] = {"type": "ModelTraining", "start": time.time()}
+
+    try:
+        data_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data"))
+        source_dir = os.path.join(data_path, "training")
+        models_dir = os.path.join(data_path, "models")
+
+        os.makedirs(source_dir, exist_ok=True)
+        os.makedirs(models_dir, exist_ok=True)
+
+        # Prevent overwriting core production models
+        protected_models = ["generic_novel", "default", "language", "spell_check"]
+        category_name = request.category.strip().lower()
+
+        if category_name in protected_models:
+            category_name = f"user_{category_name}"
+
+        # Always prefix user-generated models if not already prefixed to ensure sandbox safety
+        if not category_name.startswith("_") and not category_name.startswith("user_"):
+            category_name = f"_{category_name}"
+
+        source_path = os.path.join(source_dir, f"{category_name}_source.txt")
+        model_path = os.path.join(models_dir, f"{category_name}.json")
+
+        # If text is provided in request, update the source file
+        if request.text:
+            with open(source_path, "w", encoding="utf-8") as f:
+                f.write(request.text)
+
+        if not os.path.exists(source_path):
+            raise HTTPException(status_code=400, detail=f"Source file {source_path} not found and no text provided.")
+
+        # Call native engine training logic
+        # We use the internal engine wrapper to trigger training
+        success = engine.train_markov_model(source_path, model_path, request.ngram_size)
+
+        if success:
+            # Hot-reload the models
+            refresh_markov_models()
+            return {"status": "success", "model": category_name, "ngram_size": request.ngram_size}
+        else:
+            raise HTTPException(status_code=500, detail="Native training failed.")
+
+    except Exception as e:
+        logger.error(f"Training error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        active_tasks_tracker.pop(task_id, None)
 
 @app.post("/semantic")
 async def semantic_analysis(request: ProcessingRequest):
