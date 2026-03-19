@@ -119,10 +119,16 @@ LanguageProfile NLPEngine::detect_language(const std::string& text) {
     std::map<std::string, int> scores = {{"en", 0}, {"de", 0}, {"fr", 0}};
     auto tokens = tokenize(text);
 
+    // Create unordered sets for O(1) stopword lookup
+    std::unordered_set<std::string> en_stops(model_->get_stopwords("en").begin(), model_->get_stopwords("en").end());
+    std::unordered_set<std::string> de_stops(model_->get_stopwords("de").begin(), model_->get_stopwords("de").end());
+    std::unordered_set<std::string> fr_stops(model_->get_stopwords("fr").begin(), model_->get_stopwords("fr").end());
+
     for (const auto& token : tokens) {
-        if (std::find(model_->get_stopwords("en").begin(), model_->get_stopwords("en").end(), token) != model_->get_stopwords("en").end()) scores["en"]++;
-        if (std::find(model_->get_stopwords("de").begin(), model_->get_stopwords("de").end(), token) != model_->get_stopwords("de").end()) scores["de"]++;
-        if (std::find(model_->get_stopwords("fr").begin(), model_->get_stopwords("fr").end(), token) != model_->get_stopwords("fr").end()) scores["fr"]++;
+        std::string lower_token = to_lower(token);
+        if (en_stops.count(lower_token)) scores["en"]++;
+        if (de_stops.count(lower_token)) scores["de"]++;
+        if (fr_stops.count(lower_token)) scores["fr"]++;
     }
 
     std::string best_lang = "en";

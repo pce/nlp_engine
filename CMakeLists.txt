@@ -26,6 +26,8 @@ FetchContent_MakeAvailable(json)
 add_library(nlp_engine
     nlp/nlp_engine.cpp
     nlp/nlp_engine.h
+    nlp/nlp_engine_async.cpp
+    nlp/nlp_engine_async.hh
 )
 
 target_include_directories(nlp_engine PUBLIC
@@ -34,6 +36,29 @@ target_include_directories(nlp_engine PUBLIC
 
 # Link JSON
 target_link_libraries(nlp_engine PUBLIC nlohmann_json::nlohmann_json)
+
+# -----------------------------------------------------------------------------
+# Python Bindings (Optional)
+# -----------------------------------------------------------------------------
+option(BUILD_PYTHON_BINDINGS "Build Python bindings using pybind11" OFF)
+
+if(BUILD_PYTHON_BINDINGS)
+    find_package(Python COMPONENTS Interpreter Development REQUIRED)
+
+    FetchContent_Declare(
+        pybind11
+        URL https://github.com/pybind/pybind11/archive/refs/tags/v2.13.1.tar.gz
+    )
+    FetchContent_MakeAvailable(pybind11)
+
+    pybind11_add_module(nlp_engine_python nlp/nlp_engine_wrapper.cpp nlp/nlp_engine_async.cpp)
+    target_link_libraries(nlp_engine_python PRIVATE nlp_engine)
+    set_target_properties(nlp_engine_python PROPERTIES OUTPUT_NAME nlp_engine)
+
+    message(STATUS "Python bindings: ENABLED")
+else()
+    message(STATUS "Python bindings: DISABLED")
+endif()
 
 # -----------------------------------------------------------------------------
 # Example: nlp_example_simple

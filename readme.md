@@ -6,6 +6,22 @@ _Eine leichtgewichtige C++23-Bibliothek für mehrsprachige Computerlinguistik, s
 
 ---
 
+## Async Example // Experimental
+
+To do a completely fresh, full build and start the server:
+
+```bash
+./dev.sh clean --fastapi
+```
+
+To just rebuild and restart without cleaning:
+
+````bash
+./dev.sh --fastapi
+
+
+---
+
 ## Key Features / Hauptmerkmale
 
 | Feature               | Description                       | Beschreibung                         |
@@ -53,7 +69,7 @@ int main() {
     auto sentiment = engine.analyze_sentiment(text, "de");
     auto toxicity = engine.detect_toxicity("You are stupid!", "en");
 }
-```
+````
 
 ---
 
@@ -85,8 +101,8 @@ cmake -B build -S .
 # 2. Build library, tests, and examples
 cmake --build build
 
-# 3. Run the simple example
-./build/nlp_example_simple
+# 3. Run the simple example "relative to data dir" by default
+cd build && ./nlp_example_simple
 
 # 4. Run the test suite
 cd build && ctest --output-on-failure

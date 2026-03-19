@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@layer base {
+    :root {
+        @apply bg-slate-50 dark:bg-slate-950 font-sans antialiased;
+    }
+
+    body {
+        @apply min-h-screen m-0 overflow-hidden;
+    }
+
+    /* Custom scrollbar for a more professional feel */
+    .scrollbar-thin::-webkit-scrollbar {
+        width: 6px;
+    }
+    .scrollbar-thin::-webkit-scrollbar-track {
+        @apply bg-transparent;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb {
+        @apply bg-slate-200 dark:bg-slate-800 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700;
+    }
+}
