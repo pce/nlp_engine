@@ -3,7 +3,7 @@
  * @brief Implementation of NLPModel and NLPEngine classes for ICALL.
  */
 
-#include "nlp_engine.h"
+#include "nlp_engine.hh"
 #include <algorithm>
 #include <cctype>
 #include <cmath>

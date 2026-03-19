@@ -81,6 +81,23 @@ async def startup_event():
 
         engine.initialize()
         logger.info(f"Native NLP Engine initialized with resources from {data_path}")
+
+        # Load available Markov models
+        models_dir = os.path.join(data_path, "models")
+        app.state.available_models = []
+        if os.path.exists(models_dir):
+            for model_file in os.listdir(models_dir):
+                if model_file.endswith(".json"):
+                    model_path = os.path.join(models_dir, model_file)
+                    # We can load multiple but for now we register the generic one
+                    # Register the model with its own name as the addon method
+                    model_name = os.path.splitext(model_file)[0]
+                    engine.load_markov_model(model_path, model_name)
+                    logger.info(f"Registered Markov model: {model_name} from {model_file}")
+
+                    # Store model name without extension
+                    model_name = os.path.splitext(model_file)[0]
+                    app.state.available_models.append(model_name)
     except Exception as e:
         logger.error(f"Failed to initialize native engine: {e}")
         # We don't necessarily want to kill the whole server if initialization fails during dev,
@@ -120,8 +137,27 @@ async def spell_check(request: ProcessingRequest):
 async def analyze_sentiment(request: ProcessingRequest):
     """Granular: Analyze sentiment of the provided text"""
     try:
-        res = engine.process_text_sync(request.text, "sentiment", request.options)
+        res = engine.process_sync(request.text, "sentiment", request.options)
         return json.loads(res)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/generate")
+async def generate_text(request: ProcessingRequest):
+    """Generate text using a registered Markov model"""
+    try:
+        # Default to markov_generator if no specific addon provided
+        method = request.plugin if request.plugin != "default" else "markov_generator"
+
+        # Ensure all option values are strings for the C++ pybind interface
+        safe_options = {k: str(v) for k, v in request.options.items()}
+        res = engine.process_sync(request.text, method, safe_options)
+
+        # Addons might return raw text or JSON depending on implementation
+        try:
+            return json.loads(res)
+        except json.JSONDecodeError:
+            return {"output": res, "status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -192,7 +228,8 @@ async def health_check():
     return {
         "status": "healthy",
         "engine_type": "native",
-        "engine_ready": engine.is_ready() if engine else False
+        "engine_ready": engine.is_ready() if engine else False,
+        "available_models": getattr(app.state, "available_models", [])
     }
 
 # --- Static File Serving ---

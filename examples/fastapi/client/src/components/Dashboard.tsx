@@ -31,7 +31,7 @@ const Dashboard: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} active={activeLink} />
+        <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} active={activeLink} onContentChange={setDocumentContent} />
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 scrollbar-thin">
           <div className="max-w-5xl mx-auto space-y-8">
@@ -55,7 +55,7 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Central Editor/Analysis Workspace */}
-            <DocumentPanel onContentChange={setDocumentContent} />
+            <DocumentPanel content={documentContent} onContentChange={setDocumentContent} />
 
             {/* TODO Quick Stats */}
           </div>

@@ -1,3 +1,8 @@
+/**
+ * @file nlp_engine.hh
+ * @brief Core NLP processing components and linguistic model management.
+ */
+
 #pragma once
 
 #include <string>
@@ -86,28 +91,72 @@ struct DocumentStructure {
  * @brief Manages the loading and storage of linguistic resources (dictionaries, lexicons).
  *
  * Separating data from logic allows for resource sharing between multiple engines
- * and simplifies cross-platform path management.
+ * and simplifies cross-platform path management. This class is designed to be
+ * read-only after initialization to ensure thread safety across multiple engine instances.
  */
 class NLPModel {
 public:
+  /**
+   * @brief Default constructor.
+   */
   NLPModel() = default;
+
+  /**
+   * @brief Destructor.
+   */
   ~NLPModel() = default;
 
   /**
    * @brief Load all resources from a specific directory.
+   *
+   * Expects a directory structure containing language-specific files (e.g., 'en_stopwords.txt')
+   * and global sentiment lexicons.
+   *
    * @param base_path Path to the directory containing .txt resource files.
    * @return true if critical resources were successfully loaded.
    */
   bool load_from(const std::string& base_path);
 
-  // --- Resource Getters ---
+  /**
+   * @brief Retrieves stopword list for a specific language.
+   * @param lang Language code (e.g., "en", "de", "fr").
+   * @return Vector of stopword strings.
+   */
   const std::vector<std::string>& get_stopwords(const std::string& lang) const;
+
+  /**
+   * @brief Retrieves dictionary word list for a specific language.
+   * @param lang Language code.
+   * @return Vector of valid dictionary words.
+   */
   const std::vector<std::string>& get_dictionary(const std::string& lang) const;
+
+  /**
+   * @brief Gets the positive sentiment lexicon.
+   * @return Map of word to positive sentiment score.
+   */
   const std::map<std::string, float>& get_positive_lexicon() const { return positive_words_; }
+
+  /**
+   * @brief Gets the negative sentiment lexicon.
+   * @return Map of word to negative sentiment score.
+   */
   const std::map<std::string, float>& get_negative_lexicon() const { return negative_words_; }
+
+  /**
+   * @brief Gets patterns used for toxicity detection.
+   * @return Vector of regex or keyword patterns.
+   */
   const std::vector<std::string>& get_toxic_patterns() const { return toxic_patterns_; }
 
+  /**
+   * @brief Checks if the model has been successfully loaded.
+   */
   bool is_ready() const { return is_ready_; }
+
+  /**
+   * @brief Returns the absolute path from which resources were loaded.
+   */
   std::string get_current_path() const { return current_path_; }
 
   /**
@@ -152,6 +201,13 @@ private:
  *
  * Requires an NLPModel to perform language-aware operations.
  */
+/**
+ * @class NLPEngine
+ * @brief Stateless processing logic for NLP tasks.
+ *
+ * Requires an NLPModel to perform language-aware operations.
+ * Designed for high-performance synchronous execution.
+ */
 class NLPEngine {
 public:
   /**
@@ -162,31 +218,104 @@ public:
   ~NLPEngine() = default;
 
   // --- Processing Methods ---
+
+  /**
+   * @brief Detects the primary language of the input text.
+   * @param text Input text.
+   * @return LanguageProfile including language code and confidence.
+   */
   LanguageProfile detect_language(const std::string& text);
+
+  /**
+   * @brief Tokenizes text into individual words or punctuation marks.
+   */
   std::vector<std::string> tokenize(const std::string& text);
+
+  /**
+   * @brief Splits a document into individual sentences.
+   */
   std::vector<std::string> split_sentences(const std::string& text);
+
+  /**
+   * @brief Removes common stop words from a token stream.
+   * @param tokens Vector of tokens.
+   * @param lang Language code.
+   */
   std::vector<std::string> remove_stopwords(const std::vector<std::string>& tokens, const std::string& lang = "en");
+
+  /**
+   * @brief Normalizes text (lowercasing, punctuation cleanup).
+   */
   std::string normalize(const std::string& text);
 
+  /**
+   * @brief Checks spelling and provides corrections for a text.
+   */
   std::vector<Correction> spell_check(const std::string& text, const std::string& lang = "en");
+
+  /**
+   * @brief Gets similar words for a given misspelled word.
+   */
   std::vector<std::string> get_spelling_suggestions(const std::string& word, int max_dist = 2, const std::string& lang = "en");
+
+  /**
+   * @brief Calculates edit distance between two strings.
+   */
   static int levenshtein_distance(const std::string& s1, const std::string& s2);
 
+  /**
+   * @brief Generates an extractive summary of the text.
+   * @param ratio Compression ratio (0.1 to 1.0).
+   */
   SummaryResult summarize(const std::string& text, float ratio = 0.3);
+
+  /**
+   * @brief Calculates term frequency - inverse document frequency scores.
+   */
   std::map<std::string, float> calculate_tfidf(const std::string& text);
 
+  /**
+   * @brief Extracts the most relevant keywords from a text.
+   */
   std::vector<Keyword> extract_keywords(const std::string& text, int max_keywords = 10, const std::string& lang = "en");
+
+  /**
+   * @brief Identifies technical or domain-specific terminology.
+   */
   std::vector<std::string> extract_terminology(const std::string& text, const std::string& lang = "en");
 
+  /**
+   * @brief Performs Part-of-Speech tagging (Noun, Verb, etc.).
+   */
   std::vector<std::pair<std::string, std::string>> pos_tag(const std::vector<std::string>& tokens, const std::string& lang = "en");
+
+  /**
+   * @brief Reduces a word to its linguistic stem.
+   */
   std::string stem(const std::string& word, const std::string& lang = "en");
 
+  /**
+   * @brief Extracts named entities (Names, Locations, Dates).
+   */
   std::vector<Entity> extract_entities(const std::string& text, const std::string& lang = "en");
+
+  /**
+   * @brief Calculates readability scores like Flesch-Kincaid.
+   */
   ReadabilityMetrics analyze_readability(const std::string& text);
+
+  /**
+   * @brief Analyzes the sentiment of the text (Positive, Negative, Neutral).
+   */
   SentimentResult analyze_sentiment(const std::string& text, const std::string& lang = "en");
+
+  /**
+   * @brief Detects toxic or offensive content.
+   */
   ToxicityResult detect_toxicity(const std::string& text, const std::string& lang = "en");
 
   // --- Serialization ---
+
   json corrections_to_json(const std::vector<Correction>& corrections);
   json language_to_json(const LanguageProfile& profile);
   json keywords_to_json(const std::vector<Keyword>& keywords);

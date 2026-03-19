@@ -10,6 +10,13 @@ export interface NLPRequest {
   streaming?: boolean;
 }
 
+export interface MarkovRequest {
+  seed: string;
+  length?: number;
+  model?: string;
+  temperature?: number;
+}
+
 export interface NLPResponse {
   result: string;
   task_id?: string;
@@ -186,6 +193,51 @@ class NLPService {
     }
 
     return cleanup;
+  }
+
+  /**
+   * Generates text using a Markov model addon.
+   */
+  async generateMarkov(request: MarkovRequest): Promise<{ output: string; status: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: request.seed,
+          plugin: request.model || "markov_generator",
+          options: {
+            length: request.length || 100,
+            temperature: request.temperature || 1.0,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || "Generation failed");
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("NLP Generation Error:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetches the list of available Markov models from the backend.
+   */
+  async getAvailableModels(): Promise<string[]> {
+    try {
+      const response = await fetch(`${this.baseUrl}/health`);
+      if (!response.ok) return ["markov_generator"];
+      const data = await response.json();
+      return data.available_models || ["markov_generator"];
+    } catch (error) {
+      console.error("Failed to fetch models:", error);
+      return ["markov_generator"];
+    }
   }
 }
 

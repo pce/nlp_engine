@@ -2,14 +2,16 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { nlpService, NLPRequest, StreamChunk } from "../services/nlp-service";
 import { DocumentModel, DocumentState } from "../models/document";
 import Icon from "./Icon";
+import AnalysisDashboard from "./analysis/AnalysisDashboard";
 
 interface DocumentPanelProps {
+  content: string;
   onContentChange?: (content: string) => void;
 }
 
-const DocumentPanel = ({ onContentChange }: DocumentPanelProps) => {
+const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
   // Initialize document state using the model helper
-  const [doc, setDoc] = useState<DocumentState>(() => DocumentModel.createInitialState("Analysis Workspace", ""));
+  const [doc, setDoc] = useState<DocumentState>(() => DocumentModel.createInitialState("Analysis Workspace", content));
   const [selectedText, setSelectedText] = useState<string>("");
 
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -19,6 +21,13 @@ const DocumentPanel = ({ onContentChange }: DocumentPanelProps) => {
 
   // Derived stats using the model logic
   const stats = DocumentModel.getStats(doc);
+
+  // Sync internal doc state if the content is changed from outside (e.g. via Markov generation in Header)
+  useEffect(() => {
+    if (onContentChange && doc.content === "") {
+      // This is a simplified sync; in a real app we'd use a more robust state lifting pattern
+    }
+  }, [onContentChange]);
 
   const handleContentChange = (newContent: string) => {
     const updatedDoc = DocumentModel.updateContent(doc, newContent);
@@ -110,6 +119,14 @@ const DocumentPanel = ({ onContentChange }: DocumentPanelProps) => {
       }
     };
   }, []);
+
+  // Effect to listen for content updates from parent components (e.g. Markov generation)
+  // We ensure we don't accidentally sync if the content update is actually analysis results
+  useEffect(() => {
+    if (content !== doc.content && !content.startsWith("Initializing analysis stream...")) {
+      setDoc(DocumentModel.updateContent(doc, content));
+    }
+  }, [content]);
 
   return (
     <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl mb-6 overflow-hidden">
@@ -203,21 +220,21 @@ const DocumentPanel = ({ onContentChange }: DocumentPanelProps) => {
               </div>
             </div>
           ) : (
-            <div className="animate-in slide-in-from-bottom-2 duration-300">
-              <div className="bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl p-6 min-h-[320px] max-h-[500px] overflow-y-auto border border-slate-100 dark:border-slate-800">
-                {results ? (
-                  <div className="whitespace-pre-wrap text-sm font-mono leading-relaxed text-slate-700 dark:text-slate-300">
-                    {results}
-                    {isProcessing && <span className="inline-block w-2 h-4 ml-1 bg-indigo-500 animate-pulse" />}
-                  </div>
-                ) : (
-                  <div className="h-64 flex flex-col items-center justify-center text-slate-400 space-y-4">
-                    <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center opacity-50">
-                      <Icon name="analytics" size="md" />
-                    </div>
-                    <p className="text-[10px] font-black uppercase tracking-widest">Awaiting Engine Results</p>
-                  </div>
-                )}
+            <div className="animate-in slide-in-from-bottom-2 duration-300 space-y-4">
+              <div className="flex justify-between items-center px-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Real-time Engine Insight</span>
+                </div>
+                <button
+                  onClick={() => setResults("")}
+                  className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors"
+                >
+                  Reset Analysis
+                </button>
+              </div>
+              <div className="bg-slate-50/50 dark:bg-slate-900/50 rounded-3xl p-6 min-h-[400px] overflow-hidden border border-slate-100 dark:border-slate-800 shadow-inner">
+                <AnalysisDashboard results={results} isProcessing={isProcessing} />
               </div>
             </div>
           )}

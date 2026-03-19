@@ -25,7 +25,7 @@ FetchContent_MakeAvailable(json)
 # -----------------------------------------------------------------------------
 add_library(nlp_engine
     nlp/nlp_engine.cpp
-    nlp/nlp_engine.h
+    nlp/nlp_engine.hh
     nlp/nlp_engine_async.cpp
     nlp/nlp_engine_async.hh
 )
@@ -61,18 +61,37 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
-# Example: nlp_example_simple
+# Resource Management: Shared Data Target
+# To avoid race conditions when multiple targets copy the 'data' directory
+# simultaneously during parallel builds, we use a single sync target.
 # -----------------------------------------------------------------------------
-add_executable(nlp_example_simple examples/simple/main.cpp)
-target_link_libraries(nlp_example_simple PRIVATE nlp_engine)
-
-# Copy dictionaries to build directory
-add_custom_command(TARGET nlp_example_simple POST_BUILD
+add_custom_target(prepare_data ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/data"
-        "$<TARGET_FILE_DIR:nlp_example_simple>/data"
-    COMMENT "Copying dictionaries to build directory"
+        "${CMAKE_CURRENT_BINARY_DIR}/data"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/data/training"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/data/models"
+    COMMENT "Synchronizing linguistic resources and preparing model directories"
 )
+
+# -----------------------------------------------------------------------------
+# Executables
+# -----------------------------------------------------------------------------
+
+# Example: nlp_example_simple
+add_executable(nlp_example_simple examples/simple/main.cpp)
+target_link_libraries(nlp_example_simple PRIVATE nlp_engine)
+add_dependencies(nlp_example_simple prepare_data)
+
+# Trainer CLI: nlp_trainer
+add_executable(nlp_trainer training/nlp_trainer.cpp)
+target_link_libraries(nlp_trainer PRIVATE nlp_engine)
+add_dependencies(nlp_trainer prepare_data)
+
+# Example: nlp_example_train
+add_executable(nlp_example_train examples/train/main.cpp)
+target_link_libraries(nlp_example_train PRIVATE nlp_engine)
+add_dependencies(nlp_example_train prepare_data)
 
 # -----------------------------------------------------------------------------
 # Tests
@@ -81,25 +100,24 @@ option(BUILD_TESTING "Build the test suite" ON)
 
 if(BUILD_TESTING)
     enable_testing()
+
     # Standard Tests
     add_executable(nlp_tests tests/test_nlp.cpp)
     target_link_libraries(nlp_tests PRIVATE nlp_engine)
+    add_dependencies(nlp_tests prepare_data)
     add_test(NAME nlp_engine_test COMMAND nlp_tests)
 
     # Async & Integration Tests
     add_executable(nlp_tests_async tests/test_nlp_async.cpp)
     target_link_libraries(nlp_tests_async PRIVATE nlp_engine)
+    add_dependencies(nlp_tests_async prepare_data)
     add_test(NAME nlp_engine_async_test COMMAND nlp_tests_async)
 
-    # Copy data for both test targets
-    foreach(test_target nlp_tests nlp_tests_async)
-        add_custom_command(TARGET ${test_target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/data"
-                "$<TARGET_FILE_DIR:${test_target}>/data"
-            COMMENT "Copying dictionaries for ${test_target}"
-        )
-    endforeach()
+    # Markov Addon Tests
+    add_executable(nlp_tests_markov tests/test_nlp_markov.cpp)
+    target_link_libraries(nlp_tests_markov PRIVATE nlp_engine)
+    add_dependencies(nlp_tests_markov prepare_data)
+    add_test(NAME nlp_engine_markov_test COMMAND nlp_tests_markov)
 endif()
 
 # -----------------------------------------------------------------------------
@@ -112,7 +130,6 @@ if(DOXYGEN_FOUND)
     set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
     set(DOXYGEN_HTML_DIR ${CMAKE_CURRENT_BINARY_DIR}/docs/html)
 
-    # Create a template Doxyfile.in if it doesn't exist
     if(NOT EXISTS ${DOXYGEN_IN})
         file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
         file(WRITE ${DOXYGEN_IN}
@@ -136,7 +153,6 @@ if(DOXYGEN_FOUND)
 
     add_custom_target(docs
         COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
-        # CRITICAL: Disable Jekyll for GitHub Pages to show files with underscores
         COMMAND ${CMAKE_COMMAND} -E touch ${DOXYGEN_HTML_DIR}/.nojekyll
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Generating API documentation (Output in build/docs/html)"
@@ -154,4 +170,5 @@ message(STATUS "Project Name:    ${PROJECT_NAME}")
 message(STATUS "C++ Standard:    ${CMAKE_CXX_STANDARD}")
 message(STATUS "Doxygen Found:   ${DOXYGEN_FOUND}")
 message(STATUS "Build Testing:   ${BUILD_TESTING}")
+message(STATUS "Python Bindings: ${BUILD_PYTHON_BINDINGS}")
 message(STATUS "")
