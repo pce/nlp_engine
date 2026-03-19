@@ -123,9 +123,9 @@ const StatsDashboard: React.FC = () => {
 
         {/* Task Monitor Section */}
         <div className="pt-3 border-t border-slate-100 dark:border-slate-800" style={{ borderTopColor: "var(--theme-border)" }}>
-          <h5 className="text-[9px] font-black uppercase tracking-widest mb-2.5 flex items-center gap-1.5" style={{ color: "var(--theme-text-muted)" }}>
-            <Icon name="list" size="xs" />
-            Active Tasks ({stats.active_tasks?.length || 0})
+          <h5 className="text-[9px] font-black uppercase tracking-widest mb-2 flex items-center gap-1.5" style={{ color: "var(--theme-text-muted)" }}>
+            <Icon name="list" size="xs" style={{ stroke: "currentColor" }} />
+            <span>Active Tasks ({stats.active_tasks?.length || 0})</span>
           </h5>
           <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1 scrollbar-thin">
             {stats.active_tasks && stats.active_tasks.length > 0 ? (

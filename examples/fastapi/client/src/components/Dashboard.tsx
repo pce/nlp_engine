@@ -17,7 +17,10 @@ const Dashboard: React.FC = () => {
   const activeLink = (path: string) => (window.location.pathname === path ? "text-indigo-600 font-bold" : "text-slate-500 hover:text-indigo-500");
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden">
+    <div
+      className="flex h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden"
+      style={{ backgroundColor: "var(--theme-bg)", color: "var(--theme-text)" }}
+    >
       {/* Sidebar - Positioned for desktop and mobile toggle */}
       <div
         className={`fixed inset-y-0 left-0 z-50 transform ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:relative md:translate-x-0 ${
@@ -38,17 +41,23 @@ const Dashboard: React.FC = () => {
             {/* Hero Section */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div className="space-y-1">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                <div
+                  className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400"
+                  style={{ backgroundColor: "var(--theme-bg)", borderColor: "var(--theme-border)", color: "var(--theme-primary)" }}
+                >
                   <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                    <span
+                      className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"
+                      style={{ backgroundColor: "var(--theme-primary)" }}
+                    ></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500" style={{ backgroundColor: "var(--theme-primary)" }}></span>
                   </span>
                   C++ Native Interface
                 </div>
-                <h1 className="text-4xl font-black tracking-tight text-slate-800 dark:text-white leading-none mt-2">
+                <h1 className="text-4xl font-black tracking-tight text-slate-800 dark:text-white leading-none mt-2" style={{ color: "var(--theme-text)" }}>
                   NLP Studio <span className="font-light opacity-30">beta</span>
                 </h1>
-                <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">
+                <p className="text-slate-500 dark:text-slate-400 text-sm font-medium" style={{ color: "var(--theme-text-muted)" }}>
                   Perform high-performance linguistic analysis directly via FastAPI bridge.
                 </p>
               </div>

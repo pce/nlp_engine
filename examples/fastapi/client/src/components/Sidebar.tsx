@@ -143,9 +143,15 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
   };
 
   return (
-    <div className="flex flex-col h-full w-[400px] bg-slate-50 dark:bg-slate-950 border-l border-slate-200 dark:border-slate-800 transition-all duration-300 shadow-2xl overflow-hidden font-sans">
+    <div
+      className="flex flex-col h-full w-[400px] bg-slate-50 dark:bg-slate-950 border-l border-slate-200 dark:border-slate-800 transition-all duration-300 shadow-2xl overflow-hidden font-sans"
+      style={{ backgroundColor: "var(--theme-bg)", borderColor: "var(--theme-border)" }}
+    >
       {/* Navigation */}
-      <nav className="flex p-1.5 bg-slate-100 dark:bg-slate-900 m-3 rounded-xl gap-1 shrink-0 border border-slate-200/50 dark:border-slate-800/50">
+      <nav
+        className="flex p-1.5 bg-slate-100 dark:bg-slate-900 m-3 rounded-xl gap-1 shrink-0 border border-slate-200/50 dark:border-slate-800/50"
+        style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-border)" }}
+      >
         {[
           { id: "analysis", icon: "activity", label: "Analysis" },
           { id: "settings", icon: "settings", label: "Settings" },
@@ -158,9 +164,14 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
                 ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700"
                 : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
             }`}
+            style={
+              activeTab === tab.id
+                ? { backgroundColor: "var(--theme-bg)", color: "var(--theme-primary)", ringColor: "var(--theme-border)" }
+                : { color: "var(--theme-text-muted)" }
+            }
             onClick={() => setActiveTab(tab.id as any)}
           >
-            <Icon name={tab.icon as any} size="sm" />
+            <Icon name={tab.icon as any} size="sm" style={activeTab === tab.id ? { color: "var(--theme-primary)" } : {}} />
             {tab.label}
           </button>
         ))}
@@ -174,8 +185,14 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
             <header className="flex justify-between items-center px-1">
               <div className="flex flex-col">
                 <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">NLP Engine</h2>
-                <div className="flex gap-1.5 mt-1.5 p-1 bg-white dark:bg-slate-900 rounded-full border border-slate-200 dark:border-slate-800 w-fit">
-                  <div className={`w-1.5 h-1.5 rounded-full ${health.engine_ready ? "bg-blue-600" : "bg-red-500"}`}></div>
+                <div
+                  className="flex gap-1.5 mt-1.5 p-1 bg-white dark:bg-slate-900 rounded-full border border-slate-200 dark:border-slate-800 w-fit"
+                  style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-border)" }}
+                >
+                  <div
+                    className={`w-1.5 h-1.5 rounded-full ${health.engine_ready ? "bg-blue-600" : "bg-red-500"}`}
+                    style={health.engine_ready ? { backgroundColor: "var(--theme-primary)" } : {}}
+                  ></div>
                   <div className="w-1.5 h-1.5 bg-blue-500 rounded-full opacity-60"></div>
                   <div className="w-1.5 h-1.5 bg-blue-400 rounded-full opacity-30"></div>
                 </div>
@@ -188,6 +205,11 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
                     ? "bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500"
                     : "bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/20"
                 }`}
+                style={
+                  !isStreaming && health.engine_ready
+                    ? { backgroundColor: "var(--theme-primary)" }
+                    : { backgroundColor: "var(--theme-surface)", color: "var(--theme-text-muted)" }
+                }
               >
                 {isStreaming ? "Processing" : "Analyze"}
               </button>
@@ -196,22 +218,32 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
             {/* Structured Cards */}
             <div className="grid grid-cols-1 gap-3">
               {/* Language Card */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-start gap-3 shadow-sm">
-                <Icon name="language" size="md" className="text-blue-500 mt-0.5" />
+              <div
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-start gap-3 shadow-sm"
+                style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-border)" }}
+              >
+                <Icon name="language" size="md" className="text-blue-500 mt-0.5" style={{ color: "var(--theme-primary)" }} />
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-black text-[9px] uppercase tracking-widest text-slate-400">Language</h3>
-                  <div className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-0.5 truncate">
+                  <h3 className="font-black text-[9px] uppercase tracking-widest text-slate-400" style={{ color: "var(--theme-text-muted)" }}>
+                    Language
+                  </h3>
+                  <div className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-0.5 truncate" style={{ color: "var(--theme-text)" }}>
                     {results.language ? `${results.language.code.toUpperCase()} (${results.language.confidence}%)` : "Pending..."}
                   </div>
                 </div>
               </div>
 
               {/* Sentiment Card */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-start gap-3 shadow-sm">
+              <div
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-start gap-3 shadow-sm"
+                style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-border)" }}
+              >
                 <Icon name="sentiment" size="md" className="text-emerald-500 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-black text-[9px] uppercase tracking-widest text-slate-400">Sentiment</h3>
-                  <div className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-0.5 truncate">
+                  <h3 className="font-black text-[9px] uppercase tracking-widest text-slate-400" style={{ color: "var(--theme-text-muted)" }}>
+                    Sentiment
+                  </h3>
+                  <div className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-0.5 truncate" style={{ color: "var(--theme-text)" }}>
                     {results.sentiment ? `${results.sentiment.label.toUpperCase()} (${results.sentiment.score.toFixed(2)})` : "Pending..."}
                   </div>
                 </div>
@@ -219,11 +251,16 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
 
               {/* Terminology Card (Only if enabled) */}
               {config.terminology && (
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-start gap-3 shadow-sm transition-all duration-300">
+                <div
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-start gap-3 shadow-sm transition-all duration-300"
+                  style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-border)" }}
+                >
                   <Icon name="tree" size="md" className="text-amber-600 mt-0.5" />
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-black text-[9px] uppercase tracking-widest text-slate-400">Terminology</h3>
-                    <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mt-1 flex flex-wrap gap-1">
+                    <h3 className="font-black text-[9px] uppercase tracking-widest text-slate-400" style={{ color: "var(--theme-text-muted)" }}>
+                      Terminology
+                    </h3>
+                    <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mt-1 flex flex-wrap gap-1" style={{ color: "var(--theme-text)" }}>
                       {results.terminology && results.terminology.length > 0 ? (
                         results.terminology.map((t, i) => (
                           <span
@@ -247,11 +284,16 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
 
               {/* POS Summary Card */}
               {config.posTagging && (
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-start gap-3 shadow-sm">
-                  <Icon name="activity" size="md" className="text-indigo-500 mt-0.5" />
+                <div
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-start gap-3 shadow-sm"
+                  style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-border)" }}
+                >
+                  <Icon name="activity" size="md" className="text-indigo-500 mt-0.5" style={{ color: "var(--theme-primary)" }} />
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-black text-[9px] uppercase tracking-widest text-slate-400">POS Tags</h3>
-                    <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                    <h3 className="font-black text-[9px] uppercase tracking-widest text-slate-400" style={{ color: "var(--theme-text-muted)" }}>
+                      POS Tags
+                    </h3>
+                    <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-1 line-clamp-2" style={{ color: "var(--theme-text-muted)" }}>
                       {results.posSummary || "Pending analysis..."}
                     </div>
                   </div>
@@ -262,13 +304,16 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
             {/* Log Terminal Textarea */}
             <div className="space-y-2">
               <div className="flex items-center justify-between px-1">
-                <h3 className="text-[9px] font-black uppercase tracking-widest text-slate-400">Native Stream</h3>
-                {isStreaming && <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
+                <h3 className="text-[9px] font-black uppercase tracking-widest text-slate-400" style={{ color: "var(--theme-text-muted)" }}>
+                  Native Stream
+                </h3>
+                {isStreaming && <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" style={{ backgroundColor: "var(--theme-primary)" }} />}
               </div>
               <textarea
                 readOnly
                 value={streamLog || "Invoke analysis to stream logs from C++..."}
                 className="w-full h-40 bg-slate-950 text-blue-400/90 p-4 rounded-2xl font-mono text-[10px] leading-relaxed border border-slate-800 focus:outline-none resize-none scrollbar-thin scrollbar-thumb-slate-800"
+                style={{ backgroundColor: "var(--theme-bg)", borderColor: "var(--theme-border)", color: "var(--theme-primary)" }}
               />
               <div ref={logEndRef} />
             </div>
@@ -287,10 +332,18 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
                 <label
                   key={item.id}
                   className="flex items-center justify-between p-4 bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-all group"
+                  style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-border)" }}
                 >
                   <div className="flex items-center gap-3">
-                    <Icon name={item.icon as any} size="sm" className="text-slate-400 group-hover:text-blue-500 transition-colors" />
-                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300">{item.label}</span>
+                    <Icon
+                      name={item.icon as any}
+                      size="sm"
+                      className="text-slate-400 group-hover:text-blue-500 transition-colors"
+                      style={{ color: "var(--theme-text-muted)" }}
+                    />
+                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300" style={{ color: "var(--theme-text)" }}>
+                      {item.label}
+                    </span>
                   </div>
                   <div className="relative flex items-center">
                     <input
@@ -299,7 +352,10 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
                       onChange={(e) => setConfig({ ...config, [item.id]: e.target.checked })}
                       className="peer sr-only"
                     />
-                    <div className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600 peer-checked:border-emerald-500 peer-checked:bg-emerald-500 transition-all flex items-center justify-center">
+                    <div
+                      className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600 peer-checked:border-emerald-500 peer-checked:bg-emerald-500 transition-all flex items-center justify-center"
+                      style={{ borderColor: (config as any)[item.id] ? "var(--theme-primary)" : "var(--theme-border)" }}
+                    >
                       <div className="w-2 h-2 rounded-full bg-white scale-0 peer-checked:scale-100 transition-transform" />
                     </div>
                   </div>
@@ -311,8 +367,13 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
       </div>
 
       {/* Footer */}
-      <footer className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 flex justify-between items-center">
-        <span className="text-[8px] font-black tracking-widest text-slate-400 uppercase">NLP STUDIO CORE v2.0</span>
+      <footer
+        className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 flex justify-between items-center"
+        style={{ backgroundColor: "var(--theme-surface)", borderTopColor: "var(--theme-border)" }}
+      >
+        <span className="text-[8px] font-black tracking-widest text-slate-400 uppercase" style={{ color: "var(--theme-text-muted)" }}>
+          NLP STUDIO CORE v2.0
+        </span>
         <div className={`text-[8px] font-black uppercase ${health.engine_ready ? "text-emerald-500" : "text-rose-500"}`}>
           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
           <span>{health.engine_ready ? "Engine Linked" : "No Core"}</span>

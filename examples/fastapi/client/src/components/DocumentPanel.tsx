@@ -129,14 +129,22 @@ const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
   }, [content]);
 
   return (
-    <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl mb-6 overflow-hidden">
-      <div className="p-4 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+    <div
+      className="bg-white dark:bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl mb-6 overflow-hidden"
+      style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-border)" }}
+    >
+      <div
+        className="p-4 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700"
+        style={{ backgroundColor: "var(--theme-bg)", borderBottomColor: "var(--theme-border)", opacity: 0.5 }}
+      >
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
-              <Icon name="document" size="sm" class="text-indigo-600 dark:text-indigo-400" />
+            <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg" style={{ backgroundColor: "var(--theme-bg)" }}>
+              <Icon name="document" size="sm" class="text-indigo-600 dark:text-indigo-400" style={{ color: "var(--theme-primary)" }} />
             </div>
-            <h2 className="text-sm font-black uppercase tracking-widest text-slate-800 dark:text-slate-200">{doc.title}</h2>
+            <h2 className="text-sm font-black uppercase tracking-widest text-slate-800 dark:text-slate-200" style={{ color: "var(--theme-text)" }}>
+              {doc.title}
+            </h2>
           </div>
           <div className="flex gap-2">
             <button
@@ -158,11 +166,12 @@ const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
       </div>
 
       <div className="p-1">
-        <div className="flex gap-1 bg-slate-100/50 dark:bg-slate-900/30 p-1 rounded-xl m-2">
+        <div className="flex gap-1 bg-slate-100/50 dark:bg-slate-900/30 p-1 rounded-xl m-2" style={{ backgroundColor: "var(--theme-bg)" }}>
           <button
             className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
               activeTab === "editor" ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm" : "text-slate-500 hover:text-slate-700"
             }`}
+            style={activeTab === "editor" ? { backgroundColor: "var(--theme-surface)", color: "var(--theme-primary)" } : { color: "var(--theme-text-muted)" }}
             onClick={() => setActiveTab("editor")}
           >
             Input Source
@@ -171,6 +180,7 @@ const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
             className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
               activeTab === "results" ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm" : "text-slate-500 hover:text-slate-700"
             }`}
+            style={activeTab === "results" ? { backgroundColor: "var(--theme-surface)", color: "var(--theme-primary)" } : { color: "var(--theme-text-muted)" }}
             onClick={() => setActiveTab("results")}
           >
             Analysis View
@@ -185,15 +195,25 @@ const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
                 onChange={(e) => handleContentChange(e.target.value)}
                 onSelect={handleSelection}
                 className="w-full h-80 p-6 bg-transparent border-none text-lg leading-relaxed focus:outline-none focus:ring-0 resize-none font-serif placeholder:text-slate-300 dark:placeholder:text-slate-700 overflow-y-auto scrollbar-thin"
+                style={{ color: "var(--theme-text)" }}
                 placeholder="Start typing your document for C++ linguistic processing..."
                 spellCheck="false"
               />
-              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
-                <div className="flex items-center gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+              <div
+                className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center"
+                style={{ borderTopColor: "var(--theme-border)" }}
+              >
+                <div
+                  className="flex items-center gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-tighter"
+                  style={{ color: "var(--theme-text-muted)" }}
+                >
                   <span>{stats.wordCount} Words</span>
                   <span>{stats.charCount} Chars</span>
                   {selectedText && (
-                    <span className="bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded">
+                    <span
+                      className="bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded"
+                      style={{ backgroundColor: "var(--theme-bg)", color: "var(--theme-primary)" }}
+                    >
                       {selectedText.length} Chars Selected
                     </span>
                   )}
@@ -213,6 +233,11 @@ const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
                         ? "bg-slate-100 dark:bg-slate-800 text-slate-400"
                         : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-500/20"
                     }`}
+                    style={
+                      !isProcessing && (doc.content.trim() || selectedText.trim())
+                        ? { backgroundColor: "var(--theme-primary)" }
+                        : { backgroundColor: "var(--theme-bg)", color: "var(--theme-text-muted)" }
+                    }
                   >
                     {isProcessing ? "Linguistic Bridge Active..." : selectedText.trim() ? "Analyze Selection" : "Run C++ Engine"}
                   </button>
@@ -223,17 +248,23 @@ const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
             <div className="animate-in slide-in-from-bottom-2 duration-300 space-y-4">
               <div className="flex justify-between items-center px-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Real-time Engine Insight</span>
+                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" style={{ backgroundColor: "var(--theme-primary)" }} />
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400" style={{ color: "var(--theme-text-muted)" }}>
+                    Real-time Engine Insight
+                  </span>
                 </div>
                 <button
                   onClick={() => setResults("")}
                   className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors"
+                  style={{ color: "var(--theme-text-muted)" }}
                 >
                   Reset Analysis
                 </button>
               </div>
-              <div className="bg-slate-50/50 dark:bg-slate-900/50 rounded-3xl p-6 min-h-[400px] overflow-hidden border border-slate-100 dark:border-slate-800 shadow-inner">
+              <div
+                className="bg-slate-50/50 dark:bg-slate-900/50 rounded-3xl p-6 min-h-[400px] overflow-hidden border border-slate-100 dark:border-slate-800 shadow-inner"
+                style={{ backgroundColor: "var(--theme-bg)", borderColor: "var(--theme-border)" }}
+              >
                 <AnalysisDashboard results={results} isProcessing={isProcessing} />
               </div>
             </div>

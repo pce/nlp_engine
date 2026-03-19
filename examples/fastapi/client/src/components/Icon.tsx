@@ -65,11 +65,12 @@ export type IconName =
   | "cpu"
   | "microchip";
 
-export type IconSize = "sm" | "md" | "lg" | "xl";
+type IconSize = "xs" | "sm" | "md" | "lg" | "xl";
 
 const ICON_SIZE_MAP: Record<IconSize, number> = {
-  sm: 14,
-  md: 18,
+  xs: 12,
+  sm: 16,
+  md: 20,
   lg: 24,
   xl: 32,
 };
@@ -465,7 +466,7 @@ const ICONS: Record<IconName, (props: React.SVGProps<SVGSVGElement>) => React.Re
   ),
 };
 
-interface IconProps extends React.SVGProps<SVGSVGElement> {
+interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "name"> {
   name: IconName;
   size?: IconSize;
   title?: string;
@@ -482,11 +483,14 @@ export const Icon: React.FC<IconProps> = ({ name, size = "md", className = "", t
 
   return (
     <span
-      className={`inline-flex items-center justify-center shrink-0 ${className}`}
+      className={`inline-flex items-center justify-center shrink-0 overflow-hidden ${className}`}
       style={{ width: `${sizePixels}px`, height: `${sizePixels}px` }}
       title={title}
     >
-      <IconComponent {...others} style={{ width: "100%", height: "100%" }} />
+      <IconComponent
+        {...(others as React.SVGProps<SVGSVGElement>)}
+        style={{ stroke: "currentColor", fill: "none", ...others.style, width: "100%", height: "100%" }}
+      />
     </span>
   );
 };
