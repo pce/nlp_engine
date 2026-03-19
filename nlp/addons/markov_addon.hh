@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <random>
+#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -43,7 +44,7 @@ private:
     std::shared_ptr<VectorAddon> vector_engine_;
 
     std::string name_ = "markov_generator";
-    std::string version_ = "2.0.0";
+    std::string version_ = "2.1.0";
     bool ready_ = false;
 
     // Random engine for generation
@@ -117,16 +118,19 @@ public:
                             std::function<void(const std::string& chunk, bool is_final)> callback,
                             const std::unordered_map<std::string, std::string>& options,
                             std::shared_ptr<AddonContext> context = nullptr) {
+        std::cout << "[Debug] stream_impl check. Ready: " << (ready_ ? "YES" : "NO") << " Chain size: " << chain_.size() << " Model: " << name_ << std::endl;
         if (!ready_) {
-            callback("Error: Markov model not loaded", true);
             return;
         }
+
+        std::cout << "[Debug] Markov Stream Start. Chain size: " << chain_.size() << std::endl;
 
         int max_length = options.count("length") ? std::stoi(options.at("length")) : 50;
         float temperature = options.count("temperature") ? std::stof(options.at("temperature")) : 1.0f;
         float top_p = options.count("top_p") ? std::stof(options.at("top_p")) : 0.9f;
         bool use_hybrid = options.count("use_hybrid") ? (options.at("use_hybrid") == "true") : false;
         float semantic_threshold = options.count("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.3f;
+        int max_candidates = options.count("max_candidates") ? std::stoi(options.at("max_candidates")) : 100;
 
         // Ensure n_gram_size is synced from options if provided
         if (options.count("n_gram")) {
@@ -151,38 +155,55 @@ public:
                 return;
             }
             auto it = chain_.begin();
-            std::advance(it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
+            std::advance(it, std::uniform_int_distribution<size_t>(0, std::max((size_t)0, chain_.size() - 1))(gen_));
             std::istringstream ss(it->first);
             while (ss >> w) window.push_back(w);
         }
+
+        // Emit initial seed tokens to the stream
+        for (const auto& word : window) callback(word + " ", false);
 
         // Ensure we don't exceed the required history for the N-Gram key
         if (window.size() >= n_gram_size_) {
             window.erase(window.begin(), window.begin() + (window.size() - (n_gram_size_ - 1)));
         }
 
-        // Emit initial seed tokens to the stream
-        for (const auto& word : window) callback(word + " ", false);
+        std::cout << "[Debug] Initial window: [" << join_window(window) << "]" << std::endl;
 
         for (int i = 0; i < max_length; ++i) {
             std::string key = join_window(window);
             auto it = chain_.find(key);
 
+            if (i % 10 == 0) {
+                std::cout << "[Debug] Iteration " << i << ", key: '" << key << "'" << std::endl;
+            }
+
             // Backoff strategy: if trigram not found, try bigram, etc.
             while (it == chain_.end() && !window.empty()) {
                 window.erase(window.begin());
+                if (window.empty()) break;
                 key = join_window(window);
                 it = chain_.find(key);
             }
 
-            if (it == chain_.end()) {
+            if (it == chain_.end() || it->second.empty()) {
                 // Total dead end: Jump to random start
                 auto rand_it = chain_.begin();
-                std::advance(rand_it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
+                if (rand_it == chain_.end()) break;
+
+                std::advance(rand_it, std::uniform_int_distribution<size_t>(0, std::max((size_t)0, chain_.size() - 1))(gen_));
+
+                std::vector<std::string> new_window;
                 std::istringstream ss(rand_it->first);
-                window.clear();
-                while (ss >> w) window.push_back(w);
-                callback("... " + window.back() + " ", false);
+                while (ss >> w) new_window.push_back(w);
+
+                if (new_window.empty()) continue; // Safety
+
+                callback("... " + new_window.back() + " ", false);
+                window = new_window;
+                if (window.size() >= n_gram_size_) {
+                    window.erase(window.begin(), window.begin() + (window.size() - (n_gram_size_ - 1)));
+                }
                 continue;
             }
 
@@ -200,12 +221,18 @@ public:
             // Normalize
             for (auto& cand : scored_candidates) cand.second /= sum_exp;
 
-            // 2. Hybrid Semantic Filtering
-            if (use_hybrid && vector_engine_ && !window.empty()) {
+            // 2. Hybrid Semantic Filtering (Hardened)
+            if (use_hybrid && vector_engine_ && vector_engine_->is_ready() && !window.empty()) {
                 std::string context_word = window.back();
+                int attempts = 0;
                 for (auto& cand : scored_candidates) {
-                    float sim = vector_engine_->calculate_similarity(context_word, cand.first);
-                    if (sim < semantic_threshold) cand.second *= 0.1f; // Penalty
+                    if (++attempts > max_candidates) break;
+                    try {
+                        float sim = vector_engine_->calculate_similarity(context_word, cand.first);
+                        if (sim < semantic_threshold) cand.second *= 0.1f; // Penalty
+                    } catch (...) {
+                        // Skip penalty if similarity fails
+                    }
                 }
             }
 
@@ -222,8 +249,10 @@ public:
                 if (cumulative >= top_p) break;
             }
 
+            if (nucleus.empty()) nucleus = {scored_candidates.front()};
+
             // 5. Random Sample from Nucleus
-            std::uniform_real_distribution<float> dist(0.0f, cumulative);
+            std::uniform_real_distribution<float> dist(0.0f, std::max(0.0001f, cumulative));
             float target = dist(gen_);
             float current_sum = 0.0f;
             std::string next_word;
@@ -236,13 +265,20 @@ public:
                 }
             }
 
-            if (next_word.empty()) next_word = nucleus.front().first;
+            if (next_word.empty() && !nucleus.empty()) {
+                next_word = nucleus.front().first;
+            }
+
+            if (next_word.empty()) {
+                // Total stall
+                break;
+            }
 
             callback(next_word + " ", false);
 
             // Advance window
             window.push_back(next_word);
-            if (window.size() >= n_gram_size_) {
+            while (window.size() >= n_gram_size_) {
                 window.erase(window.begin());
             }
         }
@@ -253,14 +289,24 @@ public:
     AddonResponse process_impl(const std::string& input,
                               const std::unordered_map<std::string, std::string>& options,
                               std::shared_ptr<AddonContext> context = nullptr) {
+        std::cout << "[Debug] stream_impl check. Ready: " << (ready_ ? "YES" : "NO") << " Chain size: " << chain_.size() << " Model: " << name_ << std::endl;
+        if (!ready_) {
+            return {"", false, "Markov model not loaded", {}};
+        }
+
         std::string result;
+        int tokens_generated = 0;
         process_stream_impl(input, [&](const std::string& chunk, bool is_final) {
-            if (!is_final) result += chunk;
+            if (!is_final) {
+                result += chunk;
+                tokens_generated++;
+            }
         }, options, context);
 
         AddonResponse resp;
         resp.output = result;
         resp.success = true;
+        resp.metrics["tokens_generated"] = static_cast<double>(tokens_generated);
         return resp;
     }
 
@@ -281,12 +327,19 @@ public:
 
         auto model_data = data.contains("data") ? data["data"] : data;
         for (auto it = model_data.begin(); it != model_data.end(); ++it) {
+            if (it.key() == "metadata" || it.key() == "ngram_size" || it.key() == "data") continue;
+
             std::string key = it.key();
+            if (!it.value().is_object()) continue;
+
             for (auto next_it = it.value().begin(); next_it != it.value().end(); ++next_it) {
-                chain_[key][next_it.key()] = next_it.value();
+                if (next_it.value().is_number()) {
+                    chain_[key][next_it.key()] = next_it.value().get<uint32_t>();
+                }
             }
         }
 
+        std::cout << "[Debug] Load Pack: " << path << " Ready: " << (!chain_.empty() ? "YES" : "NO") << " Items: " << chain_.size() << std::endl;
         ready_ = !chain_.empty();
         return ready_;
     }

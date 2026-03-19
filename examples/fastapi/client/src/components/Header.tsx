@@ -7,10 +7,10 @@ import { useTheme } from "../hooks/useTheme";
 interface HeaderProps {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
-  active: (path: string) => string;
+  active?: (path: string) => string;
   onContentChange?: (content: string) => void;
   isGenerating?: boolean;
-  setIsGenerating?: (val: boolean) => void;
+  setIsGenerating?: (isGenerating: boolean) => void;
 }
 
 /**
@@ -43,7 +43,9 @@ const Header: React.FC<HeaderProps> = ({
     temperature: 1.0,
     nGram: 2,
   });
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const markovRef = useRef<HTMLDivElement>(null);
+  const statsRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
 
   // Fetch available models on mount
   useEffect(() => {
@@ -60,12 +62,17 @@ const Header: React.FC<HeaderProps> = ({
     });
   }, []);
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (markovRef.current && !markovRef.current.contains(target)) {
         setIsMarkovOpen(false);
+      }
+      if (statsRef.current && !statsRef.current.contains(target)) {
         setIsStatsOpen(false);
+      }
+      if (settingsRef.current && !settingsRef.current.contains(target)) {
         setIsSettingsOpen(false);
       }
     };
@@ -101,7 +108,7 @@ const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const handleGenerate = async (withInput: boolean) => {
+  const handleGenerate = async (withInput: boolean, useStream: boolean = true) => {
     setIsMarkovOpen(false);
     setIsGenerating(true);
 
@@ -119,37 +126,48 @@ const Header: React.FC<HeaderProps> = ({
         }
       }
 
-      let accumulated = "";
       const separator = withInput && initialText && !initialText.endsWith(" ") ? " " : "";
       const baseText = withInput ? initialText + separator : "";
 
-      await nlpService.generateMarkovStream(
-        {
-          seed: seed || "The",
-          length: genOptions.length,
-          model: selectedModel,
-          session_id: sessionId,
-          options: {
-            use_hybrid: genOptions.useHybrid ? "true" : "false",
-            top_p: genOptions.top_p.toString(),
-            temperature: genOptions.temperature.toString(),
-            n_gram: genOptions.nGram.toString(),
+      const request = {
+        seed: seed || "The",
+        length: genOptions.length,
+        model: selectedModel,
+        session_id: sessionId,
+        temperature: genOptions.temperature,
+        top_p: genOptions.top_p,
+        n_gram: genOptions.nGram,
+        use_hybrid: genOptions.useHybrid,
+      };
+
+      if (useStream) {
+        let accumulated = "";
+        await nlpService.generateMarkovStream(
+          request,
+          (chunk, is_final) => {
+            accumulated += chunk;
+            if (onContentChange && response.output) {
+              console.log("Batch generation complete:", response.output);
+              onContentChange(baseText + accumulated);
+            }
+            if (is_final) setIsGenerating(false);
           },
-        },
-        (chunk, is_final) => {
-          accumulated += chunk;
-          if (onContentChange) {
-            onContentChange(baseText + accumulated);
-          }
-          if (is_final) setIsGenerating(false);
-        },
-        (err) => {
-          console.error("Streaming error:", err);
-          setIsGenerating(false);
-        },
-      );
+          (err) => {
+            console.error("Streaming error:", err);
+            setIsGenerating(false);
+          },
+        );
+      } else {
+        // Background / Batch generation
+        const response = await nlpService.generateMarkov(request);
+        if (onContentChange && response.output) {
+          console.log("Batch generation complete:", response.output);
+          onContentChange(baseText + response.output);
+        }
+        setIsGenerating(false);
+      }
     } catch (error) {
-      console.error("Failed to start Markov stream:", error);
+      console.error("Failed to generate Markov text:", error);
       setIsGenerating(false);
     }
   };
@@ -177,7 +195,7 @@ const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-6">
-          <div className="relative" ref={dropdownRef}>
+          <div className="relative" ref={markovRef}>
             <button
               onClick={() => setIsMarkovOpen(!isMarkovOpen)}
               className={`group flex items-center gap-3 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 transition-all ${
@@ -238,9 +256,10 @@ const Header: React.FC<HeaderProps> = ({
                       <span className="text-[10px] font-bold text-slate-500">Hybrid Vector Mode</span>
                       <button
                         onClick={() => setGenOptions((prev) => ({ ...prev, useHybrid: !prev.useHybrid }))}
-                        className={`w-8 h-4 rounded-full transition-colors relative ${genOptions.useHybrid ? "bg-indigo-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                        className={`w-8 h-4 rounded-full transition-all relative ${genOptions.useHybrid ? "bg-indigo-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                        style={genOptions.useHybrid ? { backgroundColor: "var(--theme-primary)" } : {}}
                       >
-                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${genOptions.useHybrid ? "left-4.5" : "left-0.5"}`} />
+                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${genOptions.useHybrid ? "left-4" : "left-0.5"}`} />
                       </button>
                     </div>
                     <div className="flex justify-between items-center">
@@ -295,13 +314,24 @@ const Header: React.FC<HeaderProps> = ({
 
                 <div className="px-2 pt-2 space-y-1">
                   <button
-                    onClick={() => handleGenerate(false)}
+                    onClick={() => handleGenerate(false, true)}
                     disabled={isGenerating}
                     className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 transition-all flex items-center justify-between group"
                   >
                     <div className="flex items-center gap-2">
                       <Icon name="sparkles" size="sm" />
-                      <span>Generate Story</span>
+                      <span>Generate Story (Stream)</span>
+                    </div>
+                    <Icon name="chevron-down" size="sm" className="-rotate-90 opacity-0 group-hover:opacity-100 transition-all" />
+                  </button>
+                  <button
+                    onClick={() => handleGenerate(false, false)}
+                    disabled={isGenerating}
+                    className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 transition-all flex items-center justify-between group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Icon name="activity" size="sm" />
+                      <span>Generate Story (Batch)</span>
                     </div>
                     <Icon name="chevron-down" size="sm" className="-rotate-90 opacity-0 group-hover:opacity-100 transition-all" />
                   </button>
@@ -331,7 +361,7 @@ const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-3 relative" ref={dropdownRef}>
+          <div className="flex items-center gap-3 relative" ref={settingsRef}>
             <button
               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
               className={`p-2 rounded-lg transition-colors ${
@@ -377,22 +407,24 @@ const Header: React.FC<HeaderProps> = ({
               </div>
             )}
 
-            <button
-              onClick={() => setIsStatsOpen(!isStatsOpen)}
-              className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all shadow-sm ${
-                isStatsOpen
-                  ? "bg-indigo-600 border-indigo-500 text-white ring-2 ring-indigo-500/20"
-                  : "bg-slate-100 dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:ring-2 ring-indigo-500/20"
-              }`}
-              style={
-                isStatsOpen
-                  ? { backgroundColor: "var(--theme-primary)", borderColor: "var(--theme-primary)" }
-                  : { backgroundColor: "var(--theme-bg)", borderColor: "var(--theme-border)", color: "var(--theme-text-muted)" }
-              }
-            >
-              <span className="text-xs font-black">JS</span>
-            </button>
-            {isStatsOpen && <StatsDashboard />}
+            <div ref={statsRef} className="flex items-center">
+              <button
+                onClick={() => setIsStatsOpen(!isStatsOpen)}
+                className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all shadow-sm ${
+                  isStatsOpen
+                    ? "bg-indigo-600 border-indigo-500 text-white ring-2 ring-indigo-500/20"
+                    : "bg-slate-100 dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:ring-2 ring-indigo-500/20"
+                }`}
+                style={
+                  isStatsOpen
+                    ? { backgroundColor: "var(--theme-primary)", borderColor: "var(--theme-primary)" }
+                    : { backgroundColor: "var(--theme-bg)", borderColor: "var(--theme-border)", color: "var(--theme-text-muted)" }
+                }
+              >
+                <span className="text-xs font-black">JS</span>
+              </button>
+              {isStatsOpen && <StatsDashboard />}
+            </div>
           </div>
         </div>
       </div>

@@ -10,6 +10,7 @@
 #include <numeric>
 #include <fstream>
 #include <sstream>
+#include <iostream>
 #include <nlohmann/json.hpp>
 
 namespace pce::nlp {
@@ -33,7 +34,7 @@ private:
     size_t dimensions_ = 0;
 
     std::string name_ = "vector_engine";
-    std::string version_ = "1.0.0";
+    std::string version_ = "1.0.1";
     bool ready_ = false;
 
 public:
@@ -70,20 +71,24 @@ public:
         std::string method = options.count("method") ? options.at("method") : "similarity";
         json result;
 
-        if (method == "similarity") {
-            // Compare input text to a target in options
-            std::string target = options.count("target") ? options.at("target") : "";
-            float score = calculate_similarity(input, target);
-            result["cosine_similarity"] = score;
-        }
-        else if (method == "nearest_neighbors") {
-            int k = options.count("k") ? std::stoi(options.at("k")) : 5;
-            auto neighbors = find_nearest_neighbors(input, k);
-            result["neighbors"] = neighbors;
-        }
-        else if (method == "outlier_detection") {
-            // Identifies which word in a sequence doesn't belong semantically
-            result["outliers"] = detect_outliers(input);
+        try {
+            if (method == "similarity") {
+                // Compare input text to a target in options
+                std::string target = options.count("target") ? options.at("target") : "";
+                float score = calculate_similarity(input, target);
+                result["cosine_similarity"] = score;
+            }
+            else if (method == "nearest_neighbors") {
+                int k = options.count("k") ? std::stoi(options.at("k")) : 5;
+                auto neighbors = find_nearest_neighbors(input, k);
+                result["neighbors"] = neighbors;
+            }
+            else if (method == "outlier_detection") {
+                // Identifies which word in a sequence doesn't belong semantically
+                result["outliers"] = detect_outliers(input);
+            }
+        } catch (const std::exception& e) {
+            return {"", false, std::string("Vector operation failed: ") + e.what(), {}};
         }
 
         AddonResponse resp;
@@ -98,9 +103,18 @@ public:
      * @brief Calculates Cosine Similarity between two strings by averaging their vectors.
      */
     float calculate_similarity(const std::string& s1, const std::string& s2) {
+        if (!ready_) return 0.0f;
+
+        // Debug logging for tracking execution flow in hybrid mode
+        // std::cout << "[DEBUG] Computing similarity between [" << s1 << "] and [" << s2 << "]" << std::endl;
+
         auto v1 = get_text_vector(s1);
         auto v2 = get_text_vector(s2);
-        return cosine_similarity(v1, v2);
+
+        float result = cosine_similarity(v1, v2);
+
+        // std::cout << "[DEBUG] Similarity result: " << result << std::endl;
+        return result;
     }
 
     /**
@@ -165,15 +179,30 @@ public:
         if (!file.is_open()) return false;
 
         json data;
-        file >> data;
-
-        embeddings_.clear();
-        for (auto it = data.begin(); it != data.end(); ++it) {
-            embeddings_[it.key()] = it.value().get<std::vector<float>>();
-            if (dimensions_ == 0) dimensions_ = embeddings_[it.key()].size();
+        try {
+            file >> data;
+        } catch (...) {
+            return false;
         }
 
-        ready_ = !embeddings_.empty();
+        embeddings_.clear();
+        dimensions_ = 0;
+
+        for (auto it = data.begin(); it != data.end(); ++it) {
+            try {
+                std::vector<float> vec = it.value().get<std::vector<float>>();
+                if (dimensions_ == 0) {
+                    dimensions_ = vec.size();
+                } else if (vec.size() != dimensions_) {
+                    continue; // Skip inconsistent vectors
+                }
+                embeddings_[it.key()] = std::move(vec);
+            } catch (...) {
+                continue;
+            }
+        }
+
+        ready_ = !embeddings_.empty() && dimensions_ > 0;
         return ready_;
     }
 
@@ -187,6 +216,8 @@ public:
 
 private:
     std::vector<float> get_text_vector(const std::string& text) {
+        if (dimensions_ == 0) return {};
+
         std::istringstream iss(text);
         std::string word;
         std::vector<float> avg_vec(dimensions_, 0.0f);
@@ -195,26 +226,33 @@ private:
         while (iss >> word) {
             auto it = embeddings_.find(word);
             if (it != embeddings_.end()) {
-                for (size_t i = 0; i < dimensions_; ++i) avg_vec[i] += it->second[i];
+                for (size_t i = 0; i < dimensions_; ++i) {
+                    avg_vec[i] += it->second[i];
+                }
                 count++;
             }
         }
 
         if (count > 0) {
-            for (float& val : avg_vec) val /= count;
+            for (float& val : avg_vec) val /= static_cast<float>(count);
         }
         return avg_vec;
     }
 
     float cosine_similarity(const std::vector<float>& v1, const std::vector<float>& v2) {
-        if (v1.size() != v2.size() || v1.empty()) return 0.0f;
+        if (v1.size() != v2.size() || v1.empty() || dimensions_ == 0) return 0.0f;
+
         float dot = 0.0f, n1 = 0.0f, n2 = 0.0f;
         for (size_t i = 0; i < v1.size(); ++i) {
             dot += v1[i] * v2[i];
             n1 += v1[i] * v1[i];
             n2 += v2[i] * v2[i];
         }
-        return dot / (std::sqrt(n1) * std::sqrt(n2) + 1e-9f);
+
+        float mag = std::sqrt(n1) * std::sqrt(n2);
+        if (mag < 1e-9f) return 0.0f;
+
+        return dot / mag;
     }
 };
 

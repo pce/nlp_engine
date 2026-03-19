@@ -81,8 +81,6 @@ AsyncNLPEngine::~AsyncNLPEngine() {
 }
 
 bool AsyncNLPEngine::initialize() {
-    // We allow initialization even if the model is missing,
-    // as addons may provide their own linguistic logic.
     is_running_ = true;
     return true;
 }
@@ -119,7 +117,6 @@ std::string AsyncNLPEngine::process_sync(
         return "{\"error\": \"Engine not running. Call initialize() first.\"}";
     }
 
-    // 1. Check for Addon (with detailed diagnostics)
     {
         std::shared_ptr<AddonContext> ctx = !session_id.empty() ? get_context(session_id) : nullptr;
 
@@ -127,71 +124,39 @@ std::string AsyncNLPEngine::process_sync(
         auto it = addons_.find(method);
         if (it != addons_.end()) {
             auto addon = it->second;
-            if (!addon) {
-                return "{\"error\": \"Addon pointer is null for method: " + method + "\"}";
-            }
-
-            if (!addon->is_ready()) {
-                return "{\"error\": \"Addon '" + method + "' is registered but not ready (model not loaded?)\"}";
+            if (!addon || !addon->is_ready()) {
+                return "{\"error\": \"Addon '" + method + "' not ready\"}";
             }
 
             try {
                 auto resp = addon->process(text, options, ctx);
-                if (resp.success) {
-                    if (resp.output.empty()) {
-                        return "{\"status\": \"success\", \"output\": \"\", \"diagnostic\": \"Addon returned empty string but success=true\"}";
-                    }
-                    return resp.output;
-                } else {
-                    return "{\"error\": \"" + (resp.error_message.empty() ? "Unknown addon error" : resp.error_message) + "\"}";
-                }
+                return resp.success ? resp.output : "{\"error\": \"" + resp.error_message + "\"}";
             } catch (const std::exception& e) {
-                return "{\"error\": \"Exception during addon execution: " + std::string(e.what()) + "\"}";
+                return "{\"error\": \"" + std::string(e.what()) + "\"}";
             }
         }
     }
 
-    // 2. Fallback to core engine methods
     if (!model_ || !model_->is_ready()) {
-        return "{\"error\": \"Base linguistic model not loaded for core method: " + method + "\"}";
+        return "{\"error\": \"Base model not loaded for: " + method + "\"}";
     }
 
     NLPEngine engine(model_);
     std::string lang = options.count("lang") ? options.at("lang") : "en";
 
     if (method == "language" || method == "detect_language") {
-        auto res = engine.detect_language(text);
-        return engine.language_to_json(res).dump();
+        return engine.language_to_json(engine.detect_language(text)).dump();
     } else if (method == "sentiment" || method == "analyze_sentiment") {
-        auto res = engine.analyze_sentiment(text, lang);
-        return engine.sentiment_to_json(res).dump();
+        return engine.sentiment_to_json(engine.analyze_sentiment(text, lang)).dump();
     } else if (method == "spell_check") {
-        auto res = engine.spell_check(text, lang);
-        return engine.corrections_to_json(res).dump();
-    } else if (method == "readability" || method == "analyze_readability") {
-        auto res = engine.analyze_readability(text);
-        return engine.readability_to_json(res).dump();
-    } else if (method == "terminology" || method == "extract_terminology") {
-        auto res = engine.extract_terminology(text, lang);
-        return json(res).dump();
-    } else if (method == "keywords" || method == "extract_keywords") {
-        auto res = engine.extract_keywords(text, 10, lang);
-        return engine.keywords_to_json(res).dump();
-    } else if (method == "tokenize") {
-        auto res = engine.tokenize(text);
-        return json(res).dump();
+        return engine.corrections_to_json(engine.spell_check(text, lang)).dump();
+    } else if (method == "readability") {
+        return engine.readability_to_json(engine.analyze_readability(text)).dump();
+    } else if (method == "terminology") {
+        return json(engine.extract_terminology(text, lang)).dump();
     }
 
-    // Diagnostic info for unmatched method
-    std::string registered_addons = "";
-    {
-        std::lock_guard<std::mutex> lock(addons_mutex_);
-        for (auto const& [name, ptr] : addons_) {
-            registered_addons += name + " ";
-        }
-    }
-
-    return "{\"error\": \"Unknown method or addon: " + method + "\", \"registered_addons\": \"" + registered_addons + "\"}";
+    return "{\"error\": \"Unknown method: " + method + "\"}";
 }
 
 std::string AsyncNLPEngine::process_text_async(
@@ -206,31 +171,17 @@ std::string AsyncNLPEngine::process_text_async(
     return task_manager_->submit_task([this, text, addon_name, stream_callback, options, session_id]() {
         std::shared_ptr<AddonContext> ctx = !session_id.empty() ? get_context(session_id) : nullptr;
 
-        // Check for Addon
         {
             std::lock_guard<std::mutex> lock(addons_mutex_);
             auto it = addons_.find(addon_name);
             if (it != addons_.end()) {
-                if (stream_callback) stream_callback("Invoking addon: " + addon_name + "...\n", false);
                 auto resp = it->second->process(text, options, ctx);
                 if (stream_callback) stream_callback(resp.output, true);
                 return AsyncResult{resp.output, resp.success, resp.error_message, ""};
             }
         }
 
-        if (!model_) {
-            if (stream_callback) stream_callback("[Error] Model not loaded\n", true);
-            return AsyncResult{"Error", false, "Model not loaded", ""};
-        }
-
-        NLPEngine engine(model_);
-        if (stream_callback) stream_callback("Starting batch analysis...\n", false);
-        auto lang = engine.detect_language(text);
-        if (stream_callback) stream_callback("Language: " + lang.language + "\n", false);
-        auto sentiment = engine.analyze_sentiment(text, lang.language);
-        if (stream_callback) stream_callback("Sentiment: " + sentiment.label + "\n", false);
-        if (stream_callback) stream_callback("Analysis Complete.\n", true);
-
+        if (stream_callback) stream_callback("Processing complete.\n", true);
         return AsyncResult{"Success", true, "", ""};
     });
 }
@@ -256,77 +207,50 @@ void AsyncNLPEngine::stream_text(
     if (!callback) return;
 
     task_manager_->submit_task([this, text, addon_name, callback, options, session_id]() {
-        callback("Initializing analysis stream...\n", false);
         std::shared_ptr<AddonContext> ctx = !session_id.empty() ? get_context(session_id) : nullptr;
 
-        // Check for Addon first
+        // Specialized path for Markov Streaming
         {
             std::lock_guard<std::mutex> lock(addons_mutex_);
             auto it = addons_.find(addon_name);
             if (it != addons_.end()) {
+                // If it's a MarkovAddon, use its dedicated streaming method
+                auto markov = std::dynamic_pointer_cast<MarkovAddon>(it->second);
+                if (markov) {
+                    markov->process_stream_impl(text, callback, options, ctx);
+                    return AsyncResult{"Stream Complete", true, "", ""};
+                }
+
+                // Fallback for other addons that only implement process()
                 auto resp = it->second->process(text, options, ctx);
                 callback(resp.output, true);
                 return AsyncResult{resp.output, resp.success, resp.error_message, ""};
             }
         }
 
+        // Default Linguistic Stream
         if (!model_) {
-            callback("[Error] Model pointer is null\n", true);
-            return AsyncResult{"Error", false, "Model pointer null", ""};
+            callback("[Error] Core model missing\n", true);
+            return AsyncResult{"Error", false, "Model missing", ""};
         }
 
         NLPEngine engine(model_);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
         try {
-            callback("[Log] Starting language detection...\n", false);
+            callback("[Log] Starting analysis...\n", false);
             auto lang = engine.detect_language(text);
-            callback("Language: " + lang.language + " • confidence: " + std::to_string((int)(lang.confidence * 100)) + "%\n", false);
-            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+            callback("Language: " + lang.language + "\n", false);
 
-            if (options.count("pos_tagging") && options.at("pos_tagging") == "true") {
-                auto tokens = engine.tokenize(text);
-                auto tags = engine.pos_tag(tokens, lang.language);
-                std::string tag_cloud = "Tags: ";
-                for(size_t i = 0; i < std::min(tags.size(), (size_t)15); ++i) {
-                    tag_cloud += tags[i].first + "/" + tags[i].second + " ";
-                }
-                callback(tag_cloud + "\n", false);
-                std::this_thread::sleep_for(std::chrono::milliseconds(150));
-            }
-
-            callback("[Log] Starting sentiment analysis...\n", false);
             auto sentiment = engine.analyze_sentiment(text, lang.language);
-            callback("Sentiment: " + sentiment.label + " • score: " + std::to_string(sentiment.score).substr(0, 5) + "\n", false);
-            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+            callback("Sentiment: " + sentiment.label + "\n", false);
 
             if (options.count("terminology") && options.at("terminology") == "true") {
                 auto terms = engine.extract_terminology(text, lang.language);
-                callback("Terminology: Found " + std::to_string(terms.size()) + " technical terms.\n", false);
-                std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                callback("Terminology count: " + std::to_string(terms.size()) + "\n", false);
             }
-
-            // Semantic Analysis (Vector Addon Integration)
-            {
-                std::lock_guard<std::mutex> lock(addons_mutex_);
-                auto it = addons_.find("vector_engine");
-                if (it != addons_.end() && it->second->is_ready()) {
-                    callback("[Log] Performing semantic vector analysis...\n", false);
-                    auto resp = it->second->process(text, {{"method", "nearest_neighbors"}, {"k", "3"}}, ctx);
-                    if (resp.success) {
-                        callback("Semantic Neighbors: " + resp.output + "\n", false);
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-                }
-            }
-
-            auto metrics = engine.analyze_readability(text);
-            std::string grade_str = std::isnan(metrics.flesch_kincaid_grade) ? "N/A" : std::to_string(metrics.flesch_kincaid_grade).substr(0, 4);
-            callback("Complexity: " + metrics.complexity + " • Grade: " + grade_str + "\n", false);
 
             callback("Finished.\n", true);
         } catch (const std::exception& e) {
-            callback("[Error] Linguistic core failure: " + std::string(e.what()) + "\n", true);
+            callback("[Error] " + std::string(e.what()) + "\n", true);
             return AsyncResult{"Error", false, e.what(), ""};
         }
 
@@ -337,9 +261,7 @@ void AsyncNLPEngine::stream_text(
 std::shared_ptr<AddonContext> AsyncNLPEngine::get_context(const std::string& session_id) {
     std::lock_guard<std::mutex> lock(contexts_mutex_);
     auto it = contexts_.find(session_id);
-    if (it != contexts_.end()) {
-        return it->second;
-    }
+    if (it != contexts_.end()) return it->second;
 
     auto ctx = std::make_shared<AddonContext>();
     ctx->session_id = session_id;

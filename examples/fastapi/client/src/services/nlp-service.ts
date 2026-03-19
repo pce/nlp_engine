@@ -15,7 +15,12 @@ export interface MarkovRequest {
   length?: number;
   model?: string;
   temperature?: number;
+  top_p?: number;
+  n_gram?: number;
+  use_hybrid?: boolean;
+  semantic_filter?: number;
   session_id?: string;
+  options?: Record<string, string>;
 }
 
 export interface NLPResponse {
@@ -204,7 +209,20 @@ class NLPService {
     url.searchParams.append("seed", request.seed);
     url.searchParams.append("model", request.model || "generic_novel");
     url.searchParams.append("length", String(request.length || 150));
+
+    if (request.temperature !== undefined) url.searchParams.append("temperature", String(request.temperature));
+    if (request.top_p !== undefined) url.searchParams.append("top_p", String(request.top_p));
+    if (request.n_gram !== undefined) url.searchParams.append("n_gram", String(request.n_gram));
+    if (request.use_hybrid !== undefined) url.searchParams.append("use_hybrid", request.use_hybrid ? "true" : "false");
+    if (request.semantic_filter !== undefined) url.searchParams.append("semantic_filter", String(request.semantic_filter));
     if (request.session_id) url.searchParams.append("session_id", request.session_id);
+
+    // If options are passed explicitly as a record
+    if (request.options) {
+      Object.entries(request.options).forEach(([key, value]) => {
+        url.searchParams.append(key, value);
+      });
+    }
 
     const eventSource = new EventSource(url.toString());
 

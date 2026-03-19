@@ -28,7 +28,11 @@ const StatsDashboard: React.FC = () => {
         if (!response.ok) throw new Error("Health check failed");
         const data = await response.json();
 
-        setStats(data.stats);
+        // The backend returns health info at the root, including stats
+        setStats({
+          ...data.stats,
+          active_tasks: data.stats?.active_tasks || [],
+        });
         setError(false);
       } catch (e) {
         console.error("Stats fetch failed", e);

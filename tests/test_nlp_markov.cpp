@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include "../nlp/addons/vector_addon.hh"
 
 namespace fs = std::filesystem;
 using namespace pce::nlp;
@@ -87,6 +88,49 @@ TEST(MarkovAddonTests, TextGenerationInference) {
     // Ensure smart punctuation/capitalization is active
     // "hello" -> "Hello" due to auto-formatting
     CHECK(std::isupper(static_cast<unsigned char>(resp.output[0])));
+}
+
+TEST(MarkovAddonTests, HybridVectorScoring) {
+    // 1. Setup a simple Markov model
+    create_dummy_data("apple banana apple cherry apple date");
+    addon->train(test_input_path, test_model_path);
+    addon->load_knowledge_pack(test_model_path);
+
+    // 2. Setup a Vector engine with a fake "similarity"
+    // We'll create a model where "apple" is more similar to "banana" than "cherry"
+    auto vector_addon = std::make_shared<VectorAddon>();
+    const std::string vector_model_path = "test_vector_model.json";
+
+    nlohmann::json vec_data;
+    vec_data["apple"] = {1.0, 0.0};
+    vec_data["banana"] = {0.9, 0.1}; // High similarity to apple
+    vec_data["cherry"] = {0.1, 0.9}; // Low similarity to apple
+    vec_data["date"] = {0.0, 1.0};   // Low similarity to apple
+
+    std::ofstream v_out(vector_model_path);
+    v_out << vec_data.dump();
+    v_out.close();
+
+    vector_addon->load_knowledge_pack(vector_model_path);
+    addon->set_vector_engine(vector_addon);
+
+    // 3. Generate with hybrid enabled and high threshold
+    std::unordered_map<std::string, std::string> options = {
+        {"length", "10"},
+        {"use_hybrid", "true"},
+        {"semantic_filter", "0.5"},
+        {"temperature", "0.1"} // Low temperature to make it deterministic
+    };
+
+    AddonResponse resp = addon->process("apple", options);
+    CHECK_TRUE(resp.success);
+
+    // With semantic penalty, "banana" should be preferred over "cherry" or "date"
+    // because its similarity to "apple" (0.9) is above the threshold (0.5).
+    // Note: The Markov counts for banana, cherry, date after "apple" are all 1 in training data.
+    CHECK(resp.output.find("banana") != std::string::npos);
+
+    if (fs::exists(vector_model_path)) fs::remove(vector_model_path);
 }
 
 TEST(MarkovAddonTests, DeadEndRecovery) {
