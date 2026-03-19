@@ -128,6 +128,11 @@ public:
         bool use_hybrid = options.count("use_hybrid") ? (options.at("use_hybrid") == "true") : false;
         float semantic_threshold = options.count("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.3f;
 
+        // Ensure n_gram_size is synced from options if provided
+        if (options.count("n_gram")) {
+            n_gram_size_ = std::max((size_t)2, (size_t)std::stoul(options.at("n_gram")));
+        }
+
         std::vector<std::string> window;
         std::istringstream iss(input);
         std::string w;
@@ -141,17 +146,22 @@ public:
 
         // Handle empty or too small seed
         if (window.empty()) {
+            if (chain_.empty()) {
+                callback("Error: Chain is empty. Please train the model first.", true);
+                return;
+            }
             auto it = chain_.begin();
             std::advance(it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
             std::istringstream ss(it->first);
             while (ss >> w) window.push_back(w);
         }
 
-        // Trim window to n_gram_size - 1
+        // Ensure we don't exceed the required history for the N-Gram key
         if (window.size() >= n_gram_size_) {
             window.erase(window.begin(), window.begin() + (window.size() - (n_gram_size_ - 1)));
         }
 
+        // Emit initial seed tokens to the stream
         for (const auto& word : window) callback(word + " ", false);
 
         for (int i = 0; i < max_length; ++i) {

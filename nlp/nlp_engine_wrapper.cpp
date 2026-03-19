@@ -132,6 +132,12 @@ public:
     bool is_ready() {
         return engine_ != nullptr && model_ != nullptr && model_->is_ready();
     }
+
+    bool train_markov_model(const std::string& source_path, const std::string& output_path, size_t ngram_size = 2) {
+        auto markov = std::make_shared<MarkovAddon>();
+        markov->set_ngram_size(ngram_size);
+        return markov->train(source_path, output_path);
+    }
 };
 
 PYBIND11_MODULE(nlp_engine, m) {
@@ -153,6 +159,8 @@ PYBIND11_MODULE(nlp_engine, m) {
              "Load a pre-trained JSON Knowledge Pack")
         .def("train", &MarkovAddon::train, py::arg("source_path"), py::arg("output_path"),
              "Train a new model from a text file")
+        .def("set_ngram_size", &MarkovAddon::set_ngram_size, py::arg("n"),
+             "Set the N-Gram context size. 2 = Bigram, 3 = Trigram.")
         .def("get_training_progress", &MarkovAddon::get_training_progress)
         .def("process", [](MarkovAddon& self, const std::string& input,
                            const std::unordered_map<std::string, std::string>& options,
@@ -197,5 +205,8 @@ PYBIND11_MODULE(nlp_engine, m) {
         .def("clear_session", &PythonAsyncNLPEngine::clear_session, py::arg("session_id"))
         .def("has_addon", &PythonAsyncNLPEngine::has_addon)
         .def("remove_addon", &PythonAsyncNLPEngine::remove_addon)
-        .def("is_ready", &PythonAsyncNLPEngine::is_ready);
+        .def("is_ready", &PythonAsyncNLPEngine::is_ready)
+        .def("train_markov_model", &PythonAsyncNLPEngine::train_markov_model,
+             py::arg("source_path"), py::arg("output_path"), py::arg("ngram_size") = 2,
+             "Train a new Markov model and save to disk");
 }
