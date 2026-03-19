@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import Icon from "./Icon";
 import { nlpService } from "../services/nlp-service";
+import StatsDashboard from "./StatsDashboard";
 
 interface HeaderProps {
   sidebarOpen: boolean;
@@ -15,7 +16,9 @@ interface HeaderProps {
  */
 const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentChange }) => {
   const [isMarkovOpen, setIsMarkovOpen] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [sessionId] = useState(() => `session_${Math.random().toString(36).substring(2, 11)}`);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("generic_novel");
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -40,6 +43,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentC
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsMarkovOpen(false);
+        setIsStatsOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -68,6 +72,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentC
         seed: seed || "The",
         length: 150,
         model: selectedModel,
+        session_id: sessionId,
       });
 
       if (response && response.output && onContentChange) {
@@ -188,13 +193,21 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentC
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 relative" ref={dropdownRef}>
             <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
               <Icon name="settings" size="sm" />
             </button>
-            <button className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:ring-2 ring-indigo-500/20 transition-all shadow-sm">
-              <span className="text-xs font-black text-slate-600 dark:text-slate-300">JS</span>
+            <button
+              onClick={() => setIsStatsOpen(!isStatsOpen)}
+              className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all shadow-sm ${
+                isStatsOpen
+                  ? "bg-indigo-600 border-indigo-500 text-white ring-2 ring-indigo-500/20"
+                  : "bg-slate-100 dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:ring-2 ring-indigo-500/20"
+              }`}
+            >
+              <span className="text-xs font-black">JS</span>
             </button>
+            {isStatsOpen && <StatsDashboard />}
           </div>
         </div>
       </div>

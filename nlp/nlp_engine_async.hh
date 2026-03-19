@@ -86,6 +86,10 @@ private:
     std::unordered_map<std::string, std::shared_ptr<INLPAddon>> addons_;
     std::mutex addons_mutex_;
 
+    // Context storage: Persistent state for sessions or documents.
+    std::unordered_map<std::string, std::shared_ptr<AddonContext>> contexts_;
+    std::mutex contexts_mutex_;
+
     bool is_running_;
 
 public:
@@ -122,14 +126,16 @@ public:
     std::string process_sync(
         const std::string& text,
         const std::string& method,
-        const std::unordered_map<std::string, std::string>& options = {}
+        const std::unordered_map<std::string, std::string>& options = {},
+        const std::string& session_id = ""
     );
 
     std::string process_text_async(
         const std::string& text,
         const std::string& addon_name,
         StreamCallback stream_callback = nullptr,
-        const std::unordered_map<std::string, std::string>& options = {}
+        const std::unordered_map<std::string, std::string>& options = {},
+        const std::string& session_id = ""
     );
 
     std::string submit_task(
@@ -143,8 +149,21 @@ public:
         const std::string& text,
         const std::string& addon_name,
         StreamCallback callback,
-        const std::unordered_map<std::string, std::string>& options = {}
+        const std::unordered_map<std::string, std::string>& options = {},
+        const std::string& session_id = ""
     );
+
+    // --- Context Management ---
+
+    /**
+     * @brief Gets or creates a context for a specific session.
+     */
+    std::shared_ptr<AddonContext> get_context(const std::string& session_id);
+
+    /**
+     * @brief Clears a session context.
+     */
+    void clear_context(const std::string& session_id);
 };
 
 } // namespace pce::nlp

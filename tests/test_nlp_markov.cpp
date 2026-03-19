@@ -1,6 +1,6 @@
+#include "../nlp/addons/markov_addon.hh"
 #include "CppUTest/TestHarness.h"
 #include "CppUTest/CommandLineTestRunner.h"
-#include "../nlp/addons/markov_addon.hh"
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>

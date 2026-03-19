@@ -75,26 +75,29 @@ public:
     std::string process_sync(
         const std::string& text,
         const std::string& method,
-        const std::unordered_map<std::string, std::string>& options = {}
+        const std::unordered_map<std::string, std::string>& options = {},
+        const std::string& session_id = ""
     ) {
-        if (engine_) return engine_->process_sync(text, method, options);
+        if (engine_) return engine_->process_sync(text, method, options, session_id);
         return "{\"error\": \"Engine not initialized\"}";
     }
 
     std::string process_text_async(
         const std::string& text,
         const std::string& addon_name,
-        const std::unordered_map<std::string, std::string>& options = {}
+        const std::unordered_map<std::string, std::string>& options = {},
+        const std::string& session_id = ""
     ) {
         if (!engine_) return "";
-        return engine_->process_text_async(text, addon_name, nullptr, options);
+        return engine_->process_text_async(text, addon_name, nullptr, options, session_id);
     }
 
     void stream_text(
         const std::string& text,
         const std::string& addon_name,
         py::function callback,
-        const std::unordered_map<std::string, std::string>& options = {}
+        const std::unordered_map<std::string, std::string>& options = {},
+        const std::string& session_id = ""
     ) {
         auto stream_callback = [callback](const std::string& chunk, bool is_final) {
             py::gil_scoped_acquire acquire;
@@ -111,7 +114,11 @@ public:
         };
 
         py::gil_scoped_release release;
-        engine_->stream_text(text, addon_name, stream_callback, options);
+        engine_->stream_text(text, addon_name, stream_callback, options, session_id);
+    }
+
+    void clear_session(const std::string& session_id) {
+        if (engine_) engine_->clear_context(session_id);
     }
 
     bool has_addon(const std::string& name) {
@@ -130,6 +137,12 @@ public:
 PYBIND11_MODULE(nlp_engine, m) {
     m.doc() = "NLP Engine with Addon support for Python (pce::nlp)";
 
+    // --- Context Bindings ---
+    py::class_<AddonContext, std::shared_ptr<AddonContext>>(m, "AddonContext")
+        .def_readwrite("session_id", &AddonContext::session_id)
+        .def_readwrite("metadata", &AddonContext::metadata)
+        .def_readwrite("history", &AddonContext::history);
+
     // --- Markov Addon Bindings ---
     py::class_<MarkovAddon, std::shared_ptr<MarkovAddon>>(m, "MarkovAddon")
         .def(py::init<>())
@@ -141,14 +154,18 @@ PYBIND11_MODULE(nlp_engine, m) {
         .def("train", &MarkovAddon::train, py::arg("source_path"), py::arg("output_path"),
              "Train a new model from a text file")
         .def("get_training_progress", &MarkovAddon::get_training_progress)
-        .def("process", [](MarkovAddon& self, const std::string& input, const std::unordered_map<std::string, std::string>& options) {
-            auto resp = self.process(input, options);
+        .def("process", [](MarkovAddon& self, const std::string& input,
+                           const std::unordered_map<std::string, std::string>& options,
+                           std::shared_ptr<AddonContext> context) {
+            auto resp = self.process(input, options, context);
             py::dict d;
             d["output"] = resp.output;
             d["success"] = resp.success;
             d["error"] = resp.error_message;
             return d;
-        }, py::arg("input"), py::arg("options") = std::unordered_map<std::string, std::string>());
+        }, py::arg("input"),
+           py::arg("options") = std::unordered_map<std::string, std::string>(),
+           py::arg("context") = nullptr);
 
     // --- Main Engine Bindings ---
     py::class_<PythonAsyncNLPEngine>(m, "AsyncNLPEngine")
@@ -166,14 +183,18 @@ PYBIND11_MODULE(nlp_engine, m) {
         // Processing
         .def("process_sync", &PythonAsyncNLPEngine::process_sync,
              py::arg("text"), py::arg("method"),
-             py::arg("options") = std::unordered_map<std::string, std::string>())
+             py::arg("options") = std::unordered_map<std::string, std::string>(),
+             py::arg("session_id") = "")
         .def("process_text_async", &PythonAsyncNLPEngine::process_text_async,
              py::arg("text"), py::arg("addon_name"),
-             py::arg("options") = std::unordered_map<std::string, std::string>())
+             py::arg("options") = std::unordered_map<std::string, std::string>(),
+             py::arg("session_id") = "")
         .def("stream_text", &PythonAsyncNLPEngine::stream_text,
              py::arg("text"), py::arg("addon_name"), py::arg("callback"),
-             py::arg("options") = std::unordered_map<std::string, std::string>())
+             py::arg("options") = std::unordered_map<std::string, std::string>(),
+             py::arg("session_id") = "")
         // Utility
+        .def("clear_session", &PythonAsyncNLPEngine::clear_session, py::arg("session_id"))
         .def("has_addon", &PythonAsyncNLPEngine::has_addon)
         .def("remove_addon", &PythonAsyncNLPEngine::remove_addon)
         .def("is_ready", &PythonAsyncNLPEngine::is_ready);

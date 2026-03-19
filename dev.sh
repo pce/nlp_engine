@@ -81,6 +81,13 @@ fi
 step "Native Build (CMake)"
 CMAKE_ARGS=("-DCMAKE_BUILD_TYPE=${BUILD_TYPE}")
 
+# Ensure tests are built when doing full fastapi build or explicit tests
+# This ensures CppUTest is fetched and headers are available
+if [[ "$RUN_FASTAPI" -eq 1 || "$RUN_TESTS" -eq 1 ]]; then
+  info "Enabling tests (BUILD_TESTING=ON)..."
+  CMAKE_ARGS+=("-DBUILD_TESTING=ON")
+fi
+
 if [[ "$BUILD_PYTHON" -eq 1 ]]; then
   info "Enabling Python bindings..."
   CMAKE_ARGS+=("-DBUILD_PYTHON_BINDINGS=ON")

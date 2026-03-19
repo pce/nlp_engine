@@ -11,6 +11,7 @@
 #include <sstream>
 #include <algorithm>
 #include <nlohmann/json.hpp>
+#include "vector_addon.hh"
 
 namespace pce::nlp {
 
@@ -25,11 +26,15 @@ using json = nlohmann::json;
  */
 class MarkovAddon : public NLPAddon<MarkovAddon>, public ITrainable {
 private:
-    // The "Knowledge Pack" frequency map: Word -> { NextWord: Frequency }
+    // N-Gram support: Sequence of words -> { NextWord: Frequency }
+    // Using a space-separated string as key for the n-gram sequence
     std::unordered_map<std::string, std::unordered_map<std::string, uint32_t>> chain_;
 
     // Cached total counts for faster probability normalization
     std::unordered_map<std::string, uint64_t> totals_;
+
+    // Optional semantic validator
+    std::shared_ptr<VectorAddon> vector_engine_;
 
     std::string name_ = "markov_generator";
     std::string version_ = "1.0.2";
@@ -68,6 +73,13 @@ public:
 
     void set_name(const std::string& new_name) { name_ = new_name; }
 
+    /**
+     * @brief Attach a vector engine for semantic rule-based post-processing.
+     */
+    void set_vector_engine(std::shared_ptr<VectorAddon> engine) {
+        vector_engine_ = engine;
+    }
+
     bool init_impl() {
         return true;
     }
@@ -76,14 +88,29 @@ public:
      * @brief Process text generation based on a seed.
      * @param input The seed word or phrase.
      * @param options { "length": "50", "temperature": "1.0" }
+     * @param context Optional persistent state for session tracking.
      */
     AddonResponse process_impl(const std::string& input,
-                              const std::unordered_map<std::string, std::string>& options) {
+                              const std::unordered_map<std::string, std::string>& options,
+                              std::shared_ptr<AddonContext> context = nullptr) {
         if (!ready_) return {"", false, "Markov model not loaded", {}};
 
         int max_length = options.count("length") ? std::stoi(options.at("length")) : 50;
+        float top_p = options.count("top_p") ? std::stof(options.at("top_p")) : 0.9f;
+        float semantic_threshold = options.count("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.0f;
 
-        std::string result = generate_text(input, max_length);
+        // Use context history if available to influence seed selection
+        std::string effective_seed = input;
+        if (effective_seed.empty() && context && !context->history.empty()) {
+            effective_seed = context->history.back();
+        }
+
+        std::string result = generate_text_advanced(effective_seed, max_length, top_p, semantic_threshold);
+
+        // Update context history for follow-up calls
+        if (context && !result.empty()) {
+            context->history.push_back(result);
+        }
 
         AddonResponse resp;
         resp.output = result;
@@ -178,78 +205,119 @@ public:
 
 private:
     /**
-     * @brief Internal text generation logic using weighted random sampling.
-     * Handles multi-word seeds by taking the last known valid word.
+     * @brief Advanced text generation with Nucleus Sampling (Top-P) and Semantic Filtering.
      */
-    std::string generate_text(const std::string& seed, int max_length) {
+    std::string generate_text_advanced(const std::string& seed, int max_length, float top_p, float semantic_threshold) {
         if (chain_.empty()) return "";
 
         std::string current;
         std::stringstream ss;
+        std::vector<std::string> window; // Slinding window for n-gram context
 
-        // Handle multi-word input by trying to find the last valid word in the chain
+        // Initialize seed
         std::istringstream iss(seed);
-        std::vector<std::string> words;
         std::string w;
         while (iss >> w) {
-            words.push_back(clean_word(w));
-        }
-
-        if (!words.empty()) {
-            // Try to find the last word that exists in our chain
-            for (auto it = words.rbegin(); it != words.rend(); ++it) {
-                if (chain_.contains(*it)) {
-                    current = *it;
-                    // Reconstruct seed in output if it's multiple words
-                    for (size_t i = 0; i < words.size(); ++i) {
-                        ss << (i == 0 ? "" : " ") << words[i];
-                    }
-                    break;
-                }
+            std::string cleaned = clean_word(w);
+            if (!cleaned.empty()) {
+                window.push_back(cleaned);
+                if (ss.tellp() > 0) ss << " ";
+                ss << cleaned;
             }
         }
 
-        // Fallback to random start if no valid seed word found
-        if (current.empty()) {
+        if (window.empty()) {
             auto it = chain_.begin();
             std::advance(it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
             current = it->first;
             ss << current;
+            window.push_back(current);
+        } else {
+            current = window.back();
         }
 
         for (int i = 0; i < max_length; ++i) {
             auto it = chain_.find(current);
             if (it == chain_.end()) {
-                // Dead end: try to jump to a random word to keep generating if requested
+                // Dead end jump
                 auto next_it = chain_.begin();
                 std::advance(next_it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
                 current = next_it->first;
                 ss << ". " << current;
+                window = {current};
                 continue;
             }
 
             const auto& possibilities = it->second;
-            uint64_t total = totals_.at(current);
-            if (total == 0) break;
+            std::vector<std::pair<std::string, uint32_t>> candidates(possibilities.begin(), possibilities.end());
 
-            std::uniform_int_distribution<uint64_t> dist(1, total);
+            // Sort by frequency for Top-P sampling
+            std::sort(candidates.begin(), candidates.end(), [](auto& a, auto& b) {
+                return a.second > b.second;
+            });
+
+            // Apply Semantic Filtering if Vector Engine is attached
+            if (vector_engine_ && semantic_threshold > 0.0f) {
+                auto filtered = candidates;
+                candidates.clear();
+                for (const auto& cand : filtered) {
+                    float sim = vector_engine_->calculate_similarity(current, cand.first);
+                    if (sim >= semantic_threshold) {
+                        candidates.push_back(cand);
+                    }
+                }
+                if (candidates.empty()) candidates = filtered; // Fallback if all filtered
+            }
+
+            // Nucleus Sampling (Top-P)
+            uint64_t total = 0;
+            for (const auto& c : candidates) total += c.second;
+
+            uint64_t running_total = 0;
+            uint64_t target_cutoff = static_cast<uint64_t>(total * top_p);
+            std::vector<std::pair<std::string, uint32_t>> nucleus;
+
+            for (const auto& c : candidates) {
+                nucleus.push_back(c);
+                running_total += c.second;
+                if (running_total >= target_cutoff) break;
+            }
+
+            // Sample from nucleus
+            std::uniform_int_distribution<uint64_t> dist(1, std::max((uint64_t)1, running_total));
             uint64_t target = dist(gen_);
             uint64_t cumulative = 0;
+            std::string next_word;
 
-            bool found = false;
-            for (const auto& [next_word, freq] : possibilities) {
-                cumulative += freq;
+            for (const auto& c : nucleus) {
+                cumulative += c.second;
                 if (cumulative >= target) {
-                    ss << " " << next_word;
-                    current = next_word;
-                    found = true;
+                    next_word = c.first;
                     break;
                 }
             }
-            if (!found) break;
+
+            if (next_word.empty()) break;
+
+            ss << " " << next_word;
+            current = next_word;
         }
 
-        std::string res = ss.str();
+        return finalize_text(ss.str());
+    }
+
+    /**
+     * @brief Internal text generation logic using weighted random sampling.
+     * Handles multi-word seeds by taking the last known valid word.
+     */
+    std::string generate_text(const std::string& seed, int max_length) {
+        return generate_text_advanced(seed, max_length, 1.0f, 0.0f);
+    }
+
+    /**
+     * @brief Post-processing for punctuation and formatting.
+     */
+    std::string finalize_text(std::string res) {
         if (res.empty()) return "";
 
         // Capitalize first letter

@@ -20,6 +20,16 @@
 namespace pce::nlp {
 
 /**
+ * @struct AddonContext
+ * @brief Persistent state for a specific session or document.
+ */
+struct AddonContext {
+    std::string session_id;
+    std::unordered_map<std::string, std::string> metadata;
+    std::vector<std::string> history;
+};
+
+/**
  * @struct AddonResponse
  * @brief Standardized result from any NLP Addon operation.
  */
@@ -42,7 +52,8 @@ public:
     virtual bool initialize() = 0;
     virtual bool is_ready() const = 0;
     virtual AddonResponse process(const std::string& input,
-                                 const std::unordered_map<std::string, std::string>& options = {}) = 0;
+                                 const std::unordered_map<std::string, std::string>& options = {},
+                                 std::shared_ptr<AddonContext> context = nullptr) = 0;
 };
 
 /**
@@ -68,8 +79,9 @@ public:
     }
 
     AddonResponse process(const std::string& input,
-                         const std::unordered_map<std::string, std::string>& options = {}) override {
-        return static_cast<Derived*>(this)->process_impl(input, options);
+                         const std::unordered_map<std::string, std::string>& options = {},
+                         std::shared_ptr<AddonContext> context = nullptr) override {
+        return static_cast<Derived*>(this)->process_impl(input, options, context);
     }
 
 protected:

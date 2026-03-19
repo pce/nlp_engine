@@ -7,6 +7,7 @@
 #include <thread>
 #include <algorithm>
 #include "addons/markov_addon.hh"
+#include "addons/vector_addon.hh"
 
 namespace pce::nlp {
 
@@ -111,7 +112,8 @@ bool AsyncNLPEngine::has_addon(const std::string& name) {
 std::string AsyncNLPEngine::process_sync(
     const std::string& text,
     const std::string& method,
-    const std::unordered_map<std::string, std::string>& options
+    const std::unordered_map<std::string, std::string>& options,
+    const std::string& session_id
 ) {
     if (!is_running_) {
         return "{\"error\": \"Engine not running. Call initialize() first.\"}";
@@ -119,6 +121,8 @@ std::string AsyncNLPEngine::process_sync(
 
     // 1. Check for Addon (with detailed diagnostics)
     {
+        std::shared_ptr<AddonContext> ctx = !session_id.empty() ? get_context(session_id) : nullptr;
+
         std::lock_guard<std::mutex> lock(addons_mutex_);
         auto it = addons_.find(method);
         if (it != addons_.end()) {
@@ -132,7 +136,7 @@ std::string AsyncNLPEngine::process_sync(
             }
 
             try {
-                auto resp = addon->process(text, options);
+                auto resp = addon->process(text, options, ctx);
                 if (resp.success) {
                     if (resp.output.empty()) {
                         return "{\"status\": \"success\", \"output\": \"\", \"diagnostic\": \"Addon returned empty string but success=true\"}";
@@ -194,18 +198,21 @@ std::string AsyncNLPEngine::process_text_async(
     const std::string& text,
     const std::string& addon_name,
     StreamCallback stream_callback,
-    const std::unordered_map<std::string, std::string>& options
+    const std::unordered_map<std::string, std::string>& options,
+    const std::string& session_id
 ) {
     if (!is_running_) return "";
 
-    return task_manager_->submit_task([this, text, addon_name, stream_callback, options]() {
+    return task_manager_->submit_task([this, text, addon_name, stream_callback, options, session_id]() {
+        std::shared_ptr<AddonContext> ctx = !session_id.empty() ? get_context(session_id) : nullptr;
+
         // Check for Addon
         {
             std::lock_guard<std::mutex> lock(addons_mutex_);
             auto it = addons_.find(addon_name);
             if (it != addons_.end()) {
                 if (stream_callback) stream_callback("Invoking addon: " + addon_name + "...\n", false);
-                auto resp = it->second->process(text, options);
+                auto resp = it->second->process(text, options, ctx);
                 if (stream_callback) stream_callback(resp.output, true);
                 return AsyncResult{resp.output, resp.success, resp.error_message, ""};
             }
@@ -243,19 +250,21 @@ void AsyncNLPEngine::stream_text(
     const std::string& text,
     const std::string& addon_name,
     StreamCallback callback,
-    const std::unordered_map<std::string, std::string>& options
+    const std::unordered_map<std::string, std::string>& options,
+    const std::string& session_id
 ) {
     if (!callback) return;
 
-    task_manager_->submit_task([this, text, addon_name, callback, options]() {
+    task_manager_->submit_task([this, text, addon_name, callback, options, session_id]() {
         callback("Initializing analysis stream...\n", false);
+        std::shared_ptr<AddonContext> ctx = !session_id.empty() ? get_context(session_id) : nullptr;
 
         // Check for Addon first
         {
             std::lock_guard<std::mutex> lock(addons_mutex_);
             auto it = addons_.find(addon_name);
             if (it != addons_.end()) {
-                auto resp = it->second->process(text, options);
+                auto resp = it->second->process(text, options, ctx);
                 callback(resp.output, true);
                 return AsyncResult{resp.output, resp.success, resp.error_message, ""};
             }
@@ -297,6 +306,20 @@ void AsyncNLPEngine::stream_text(
                 std::this_thread::sleep_for(std::chrono::milliseconds(150));
             }
 
+            // Semantic Analysis (Vector Addon Integration)
+            {
+                std::lock_guard<std::mutex> lock(addons_mutex_);
+                auto it = addons_.find("vector_engine");
+                if (it != addons_.end() && it->second->is_ready()) {
+                    callback("[Log] Performing semantic vector analysis...\n", false);
+                    auto resp = it->second->process(text, {{"method", "nearest_neighbors"}, {"k", "3"}}, ctx);
+                    if (resp.success) {
+                        callback("Semantic Neighbors: " + resp.output + "\n", false);
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                }
+            }
+
             auto metrics = engine.analyze_readability(text);
             std::string grade_str = std::isnan(metrics.flesch_kincaid_grade) ? "N/A" : std::to_string(metrics.flesch_kincaid_grade).substr(0, 4);
             callback("Complexity: " + metrics.complexity + " • Grade: " + grade_str + "\n", false);
@@ -309,6 +332,24 @@ void AsyncNLPEngine::stream_text(
 
         return AsyncResult{"Success", true, "", ""};
     });
+}
+
+std::shared_ptr<AddonContext> AsyncNLPEngine::get_context(const std::string& session_id) {
+    std::lock_guard<std::mutex> lock(contexts_mutex_);
+    auto it = contexts_.find(session_id);
+    if (it != contexts_.end()) {
+        return it->second;
+    }
+
+    auto ctx = std::make_shared<AddonContext>();
+    ctx->session_id = session_id;
+    contexts_[session_id] = ctx;
+    return ctx;
+}
+
+void AsyncNLPEngine::clear_context(const std::string& session_id) {
+    std::lock_guard<std::mutex> lock(contexts_mutex_);
+    contexts_.erase(session_id);
 }
 
 } // namespace pce::nlp

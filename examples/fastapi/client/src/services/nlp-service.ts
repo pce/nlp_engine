@@ -15,6 +15,7 @@ export interface MarkovRequest {
   length?: number;
   model?: string;
   temperature?: number;
+  session_id?: string;
 }
 
 export interface NLPResponse {
@@ -206,6 +207,7 @@ class NLPService {
         body: JSON.stringify({
           text: request.seed,
           plugin: request.model || "markov_generator",
+          session_id: request.session_id,
           options: {
             length: request.length || 100,
             temperature: request.temperature || 1.0,

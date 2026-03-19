@@ -3,6 +3,8 @@ import sys
 import json
 import logging
 import asyncio
+import psutil
+import time
 from typing import Dict, Any, Optional
 from pathlib import Path
 from dotenv import load_dotenv
@@ -49,10 +51,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Initialize the native engine
 engine = AsyncNLPEngine()
+
+# Track active tasks for the profiler
+active_tasks_tracker = {}
 
 # --- Models ---
 
@@ -61,6 +67,7 @@ class ProcessingRequest(BaseModel):
     plugin: str = "default"
     options: Dict[str, Any] = {}
     streaming: bool = False
+    session_id: Optional[str] = None
 
 class ProcessingResponse(BaseModel):
     result: str
@@ -137,7 +144,7 @@ async def spell_check(request: ProcessingRequest):
 async def analyze_sentiment(request: ProcessingRequest):
     """Granular: Analyze sentiment of the provided text"""
     try:
-        res = engine.process_sync(request.text, "sentiment", request.options)
+        res = engine.process_sync(request.text, "sentiment", request.options, request.session_id or "")
         return json.loads(res)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -145,13 +152,15 @@ async def analyze_sentiment(request: ProcessingRequest):
 @app.post("/generate")
 async def generate_text(request: ProcessingRequest):
     """Generate text using a registered Markov model"""
+    task_id = f"gen_{int(time.time() * 1000)}"
+    active_tasks_tracker[task_id] = {"type": "MarkovGen", "start": time.time()}
     try:
         # Default to markov_generator if no specific addon provided
         method = request.plugin if request.plugin != "default" else "markov_generator"
 
         # Ensure all option values are strings for the C++ pybind interface
         safe_options = {k: str(v) for k, v in request.options.items()}
-        res = engine.process_sync(request.text, method, safe_options)
+        res = engine.process_sync(request.text, method, safe_options, request.session_id or "")
 
         # Addons might return raw text or JSON depending on implementation
         try:
@@ -161,12 +170,32 @@ async def generate_text(request: ProcessingRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/semantic")
+async def semantic_analysis(request: ProcessingRequest):
+    """Semantic: Perform vector-based operations (similarity, clustering, outliers)"""
+    try:
+        # Default to vector_engine if no specific addon provided
+        method = request.plugin if request.plugin != "default" else "vector_engine"
+
+        # Ensure all option values are strings for the C++ pybind interface
+        safe_options = {k: str(v) for k, v in request.options.items()}
+        res = engine.process_sync(request.text, method, safe_options, request.session_id or "")
+
+        try:
+            return json.loads(res)
+        except json.JSONDecodeError:
+            return {"output": res, "status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        active_tasks_tracker.pop(task_id, None)
+
 @app.post("/async-process")
 async def async_process_text(request: ProcessingRequest):
     """Submit text to the C++ engine for asynchronous processing"""
     try:
         # Returns a unique task ID from the C++ AsyncTaskManager
-        task_id = engine.process_text_async(request.text, request.plugin, request.options)
+        task_id = engine.process_text_async(request.text, request.plugin, request.options, request.session_id or "")
         return {"task_id": task_id, "status": "processing"}
     except Exception as e:
         logger.error(f"Async processing error: {e}")
@@ -178,7 +207,8 @@ async def stream_results(
     text: str,
     pos_tagging: Optional[str] = None,
     terminology: Optional[str] = None,
-    safety: Optional[str] = None
+    safety: Optional[str] = None,
+    session_id: Optional[str] = None
 ):
     """
     Bridge C++ callbacks into an SSE stream.
@@ -205,7 +235,7 @@ async def stream_results(
         try:
             # Start the native streaming process
             # The engine will trigger 'cpp_callback' multiple times
-            engine.stream_text(text, "default", cpp_callback, options)
+            engine.stream_text(text, "default", cpp_callback, options, session_id or "")
 
             while True:
                 data = await queue.get()
@@ -225,11 +255,34 @@ async def stream_results(
 @app.get("/health")
 async def health_check():
     """Check engine readiness and resource status"""
+    process = psutil.Process(os.getpid())
+
+    # Get memory info (in MB)
+    mem_info = process.memory_info()
+    ram_usage_mb = mem_info.rss / (1024 * 1024)
+
+    # Get CPU usage (this is a percentage)
+    cpu_usage = process.cpu_percent(interval=None)
+
+    # Calculate active task list
+    now = time.time()
+    active_tasks = [
+        {"id": tid, "type": tdata["type"], "elapsed": round(now - tdata["start"], 1)}
+        for tid, tdata in active_tasks_tracker.items()
+    ]
+
     return {
         "status": "healthy",
         "engine_type": "native",
         "engine_ready": engine.is_ready() if engine else False,
-        "available_models": getattr(app.state, "available_models", [])
+        "available_models": getattr(app.state, "available_models", []),
+        "stats" : {
+            "ram_mb": round(ram_usage_mb, 2),
+            "cpu_percent": cpu_usage,
+            "uptime_seconds": int(now - process.create_time()),
+            "threads": process.num_threads(),
+            "active_tasks": active_tasks
+        }
     }
 
 # --- Static File Serving ---

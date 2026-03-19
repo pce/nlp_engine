@@ -20,6 +20,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+# -----------------------------------------------------------------------------
+# Options
+# -----------------------------------------------------------------------------
+option(BUILD_TESTING "Build the test suite" ON)
+option(BUILD_PYTHON_BINDINGS "Build Python bindings using pybind11" OFF)
+
 # CppUTest (Unit Testing & Memory Leak Detection)
 if(BUILD_TESTING)
     FetchContent_Declare(
@@ -27,8 +33,8 @@ if(BUILD_TESTING)
         URL https://github.com/cpputest/cpputest/archive/refs/tags/v4.0.tar.gz
     )
     # Disable CppUTest's own internal testing and extensions we don't need to speed up build
-    set(TESTS OFF CACHE BOOL "Disable CppUTest internal tests")
-    set(EXTENSIONS ON CACHE BOOL "Enable CppUTest extensions")
+    set(TESTS OFF CACHE BOOL "Disable CppUTest internal tests" FORCE)
+    set(EXTENSIONS ON CACHE BOOL "Enable CppUTest extensions" FORCE)
     FetchContent_MakeAvailable(cpputest)
 endif()
 
@@ -52,8 +58,6 @@ target_link_libraries(nlp_engine PUBLIC nlohmann_json::nlohmann_json)
 # -----------------------------------------------------------------------------
 # Python Bindings (Optional)
 # -----------------------------------------------------------------------------
-option(BUILD_PYTHON_BINDINGS "Build Python bindings using pybind11" OFF)
-
 if(BUILD_PYTHON_BINDINGS)
     find_package(Python COMPONENTS Interpreter Development REQUIRED)
 
@@ -108,20 +112,18 @@ add_dependencies(nlp_example_train prepare_data)
 # -----------------------------------------------------------------------------
 # Tests
 # -----------------------------------------------------------------------------
-option(BUILD_TESTING "Build the test suite" ON)
-
 if(BUILD_TESTING)
     enable_testing()
 
-    # Standard Tests
+    # Standard Tests (now using CppUTest)
     add_executable(nlp_tests tests/test_nlp.cpp)
-    target_link_libraries(nlp_tests PRIVATE nlp_engine)
+    target_link_libraries(nlp_tests PRIVATE nlp_engine CppUTest CppUTestExt)
     add_dependencies(nlp_tests prepare_data)
     add_test(NAME nlp_engine_test COMMAND nlp_tests)
 
-    # Async & Integration Tests
+    # Async & Integration Tests (now using CppUTest)
     add_executable(nlp_tests_async tests/test_nlp_async.cpp)
-    target_link_libraries(nlp_tests_async PRIVATE nlp_engine)
+    target_link_libraries(nlp_tests_async PRIVATE nlp_engine CppUTest CppUTestExt)
     add_dependencies(nlp_tests_async prepare_data)
     add_test(NAME nlp_engine_async_test COMMAND nlp_tests_async)
 
