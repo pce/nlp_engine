@@ -96,6 +96,35 @@ async def shutdown_event():
 
 # --- Endpoints ---
 
+@app.post("/detect-language")
+async def detect_language(request: ProcessingRequest):
+    """Granular: Detect language of the provided text"""
+    try:
+        res = engine.process_text_sync(request.text, "language", request.options)
+        return json.loads(res)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/spell-check")
+async def spell_check(request: ProcessingRequest):
+    """Granular: Perform spell checking on the provided text"""
+    try:
+        # Default to 'en' if no language provided in options
+        lang = request.options.get("lang", "en")
+        res = engine.process_text_sync(request.text, "spell_check", request.options)
+        return json.loads(res)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sentiment")
+async def analyze_sentiment(request: ProcessingRequest):
+    """Granular: Analyze sentiment of the provided text"""
+    try:
+        res = engine.process_text_sync(request.text, "sentiment", request.options)
+        return json.loads(res)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/async-process")
 async def async_process_text(request: ProcessingRequest):
     """Submit text to the C++ engine for asynchronous processing"""

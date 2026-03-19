@@ -58,14 +58,30 @@ public:
     /**
      * @brief Synchronous processing (blocking).
      */
+    /**
+     * @brief Synchronous granular processing.
+     * @param text The input text.
+     * @param method The specific NLP method to invoke (e.g., 'spell_check', 'sentiment').
+     * @param options Method-specific options.
+     * @return JSON string containing the results.
+     */
+    std::string process_sync(
+        const std::string& text,
+        const std::string& method,
+        const std::unordered_map<std::string, std::string>& options = {}
+    ) {
+        if (engine_) {
+            return engine_->process_sync(text, method, options);
+        }
+        return "{\"error\": \"Engine not initialized\"}";
+    }
+
     std::string process_text_sync(
         const std::string& text,
         const std::string& plugin_name,
         const std::unordered_map<std::string, std::string>& options = {}
     ) {
-        // Currently calls process_text_async without a callback to initiate task
-        // In a real implementation, this might wait for the result.
-        return engine_->process_text_async(text, plugin_name, nullptr, options);
+        return process_sync(text, plugin_name, options);
     }
 
     /**
@@ -125,7 +141,8 @@ PYBIND11_MODULE(nlp_engine, m) {
         .def("load_model", &PythonAsyncNLPEngine::load_model, "Load model resources from path")
         .def("initialize", &PythonAsyncNLPEngine::initialize, "Initialize the engine")
         .def("shutdown", &PythonAsyncNLPEngine::shutdown, "Shutdown the engine")
-        .def("process_text_sync", &PythonAsyncNLPEngine::process_text_sync)
+        .def("process_sync", &PythonAsyncNLPEngine::process_sync, py::arg("text"), py::arg("method"), py::arg("options") = std::unordered_map<std::string, std::string>())
+        .def("process_text_sync", &PythonAsyncNLPEngine::process_text_sync, py::arg("text"), py::arg("plugin_name"), py::arg("options") = std::unordered_map<std::string, std::string>())
         .def("process_text_async", &PythonAsyncNLPEngine::process_text_async)
         .def("stream_text", &PythonAsyncNLPEngine::stream_text)
         .def("is_ready", &PythonAsyncNLPEngine::is_ready);

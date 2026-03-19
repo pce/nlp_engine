@@ -100,6 +100,13 @@ public:
     bool register_plugin(std::shared_ptr<AsyncNLPPlugin> plugin);
     bool unregister_plugin(const std::string& name);
 
+    // Synchronous granular processing
+    std::string process_sync(
+        const std::string& text,
+        const std::string& method,
+        const std::unordered_map<std::string, std::string>& options = {}
+    );
+
     // Async processing
     std::string process_text_async(
         const std::string& text,

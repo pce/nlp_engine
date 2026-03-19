@@ -434,8 +434,15 @@ json NLPEngine::entities_to_json(const std::vector<Entity>& entities) {
     return j;
 }
 
-json NLPEngine::readability_to_json(const ReadabilityMetrics& m) {
-    return {{"score", m.readability_score}, {"grade", m.flesch_kincaid_grade}, {"complexity", m.complexity}};
+json NLPEngine::language_to_json(const LanguageProfile& profile) {
+    json j;
+    j["language"] = profile.language;
+    j["confidence"] = profile.confidence;
+    return j;
+}
+
+json NLPEngine::readability_to_json(const ReadabilityMetrics& metrics) {
+    return {{"score", metrics.readability_score}, {"grade", metrics.flesch_kincaid_grade}, {"complexity", metrics.complexity}};
 }
 
 json NLPEngine::summary_to_json(const SummaryResult& s) {

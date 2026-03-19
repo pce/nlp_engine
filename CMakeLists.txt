@@ -81,16 +81,25 @@ option(BUILD_TESTING "Build the test suite" ON)
 
 if(BUILD_TESTING)
     enable_testing()
+    # Standard Tests
     add_executable(nlp_tests tests/test_nlp.cpp)
     target_link_libraries(nlp_tests PRIVATE nlp_engine)
-
     add_test(NAME nlp_engine_test COMMAND nlp_tests)
 
-    add_custom_command(TARGET nlp_tests POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/data"
-            "$<TARGET_FILE_DIR:nlp_tests>/data"
-    )
+    # Async & Integration Tests
+    add_executable(nlp_tests_async tests/test_nlp_async.cpp)
+    target_link_libraries(nlp_tests_async PRIVATE nlp_engine)
+    add_test(NAME nlp_engine_async_test COMMAND nlp_tests_async)
+
+    # Copy data for both test targets
+    foreach(test_target nlp_tests nlp_tests_async)
+        add_custom_command(TARGET ${test_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/data"
+                "$<TARGET_FILE_DIR:${test_target}>/data"
+            COMMENT "Copying dictionaries for ${test_target}"
+        )
+    endforeach()
 endif()
 
 # -----------------------------------------------------------------------------

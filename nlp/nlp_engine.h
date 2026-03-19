@@ -188,6 +188,7 @@ public:
 
   // --- Serialization ---
   json corrections_to_json(const std::vector<Correction>& corrections);
+  json language_to_json(const LanguageProfile& profile);
   json keywords_to_json(const std::vector<Keyword>& keywords);
   json entities_to_json(const std::vector<Entity>& entities);
   json readability_to_json(const ReadabilityMetrics& metrics);

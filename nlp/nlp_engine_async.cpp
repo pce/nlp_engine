@@ -102,6 +102,42 @@ bool AsyncNLPEngine::unregister_plugin(const std::string& name) {
     return plugins_.erase(name) > 0;
 }
 
+std::string AsyncNLPEngine::process_sync(
+    const std::string& text,
+    const std::string& method,
+    const std::unordered_map<std::string, std::string>& options
+) {
+    if (!is_running_ || !model_) return "{}";
+
+    NLPEngine engine(model_);
+    std::string lang = options.count("lang") ? options.at("lang") : "en";
+
+    if (method == "language" || method == "detect_language") {
+        auto res = engine.detect_language(text);
+        return engine.language_to_json(res).dump();
+    } else if (method == "sentiment" || method == "analyze_sentiment") {
+        auto res = engine.analyze_sentiment(text, lang);
+        return engine.sentiment_to_json(res).dump();
+    } else if (method == "spell_check") {
+        auto res = engine.spell_check(text, lang);
+        return engine.corrections_to_json(res).dump();
+    } else if (method == "readability" || method == "analyze_readability") {
+        auto res = engine.analyze_readability(text);
+        return engine.readability_to_json(res).dump();
+    } else if (method == "terminology" || method == "extract_terminology") {
+        auto res = engine.extract_terminology(text, lang);
+        return json(res).dump();
+    } else if (method == "keywords" || method == "extract_keywords") {
+        auto res = engine.extract_keywords(text, 10, lang);
+        return engine.keywords_to_json(res).dump();
+    } else if (method == "tokenize") {
+        auto res = engine.tokenize(text);
+        return json(res).dump();
+    }
+
+    return "{\"error\": \"Unknown method: " + method + "\"}";
+}
+
 std::string AsyncNLPEngine::process_text_async(
     const std::string& text,
     const std::string& plugin_name,
