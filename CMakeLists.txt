@@ -20,6 +20,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+# CppUTest (Unit Testing & Memory Leak Detection)
+if(BUILD_TESTING)
+    FetchContent_Declare(
+        cpputest
+        URL https://github.com/cpputest/cpputest/archive/refs/tags/v4.0.tar.gz
+    )
+    # Disable CppUTest's own internal testing and extensions we don't need to speed up build
+    set(TESTS OFF CACHE BOOL "Disable CppUTest internal tests")
+    set(EXTENSIONS ON CACHE BOOL "Enable CppUTest extensions")
+    FetchContent_MakeAvailable(cpputest)
+endif()
+
 # -----------------------------------------------------------------------------
 # Library: nlp_engine
 # -----------------------------------------------------------------------------
@@ -113,9 +125,10 @@ if(BUILD_TESTING)
     add_dependencies(nlp_tests_async prepare_data)
     add_test(NAME nlp_engine_async_test COMMAND nlp_tests_async)
 
-    # Markov Addon Tests
+    # Markov Addon Tests (Professional Suite with CppUTest)
     add_executable(nlp_tests_markov tests/test_nlp_markov.cpp)
-    target_link_libraries(nlp_tests_markov PRIVATE nlp_engine)
+    target_link_libraries(nlp_tests_markov PRIVATE nlp_engine CppUTest CppUTestExt)
+    target_compile_definitions(nlp_tests_markov PRIVATE CPPUTEST_MEM_LEAK_DETECTION_DISABLED=0)
     add_dependencies(nlp_tests_markov prepare_data)
     add_test(NAME nlp_engine_markov_test COMMAND nlp_tests_markov)
 endif()

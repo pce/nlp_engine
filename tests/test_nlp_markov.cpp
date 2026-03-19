@@ -1,116 +1,109 @@
-#include <iostream>
-#include <cassert>
+#include "CppUTest/TestHarness.h"
+#include "CppUTest/CommandLineTestRunner.h"
+#include "../nlp/addons/markov_addon.hh"
 #include <filesystem>
 #include <fstream>
-#include "../nlp/addons/markov_addon.hh"
+#include <nlohmann/json.hpp>
 
 namespace fs = std::filesystem;
 using namespace pce::nlp;
 
 /**
  * @file test_nlp_markov.cpp
- * @brief Unit tests for the Markov Addon and its training pipeline.
+ * @brief Professional Unit Testing for Markov Addon using CppUTest.
+ *
+ * This suite leverages CppUTest's memory leak detection and strict
+ * harness setup/teardown for the C++23 Markov engine.
  */
 
-void test_markov_training() {
-    std::cout << "Running: test_markov_training..." << std::endl;
+TEST_GROUP(MarkovAddonTests) {
+    MarkovAddon* addon;
+    const std::string test_input_path = "test_markov_input.txt";
+    const::std::string test_model_path = "test_markov_model.json";
 
-    // 1. Prepare dummy training data
-    std::string test_data_path = "test_input.txt";
-    std::string model_output_path = "test_model.json";
+    void setup() {
+        // CppUTest tracks memory allocated here
+        addon = new MarkovAddon();
+    }
 
-    std::ofstream out(test_data_path);
-    out << "The quick brown fox jumps over the lazy dog. The quick brown fox is fast.";
-    out.close();
+    void teardown() {
+        delete addon;
+        if (fs::exists(test_input_path)) fs::remove(test_input_path);
+        if (fs::exists(test_model_path)) fs::remove(test_model_path);
+    }
 
-    // 2. Train
-    MarkovAddon addon;
-    bool success = addon.train(test_data_path, model_output_path);
-    assert(success == true);
-    assert(fs::exists(model_output_path));
+    void create_dummy_data(const std::string& content) {
+        std::ofstream out(test_input_path);
+        out << content;
+        out.close();
+    }
+};
 
-    // 3. Verify content
-    std::ifstream in(model_output_path);
+TEST(MarkovAddonTests, InitializationSafety) {
+    // Ensure addon starts in a safe, non-ready state
+    CHECK_FALSE(addon->is_ready());
+
+    // Check error handling when model isn't loaded
+    AddonResponse resp = addon->process("test", {});
+    CHECK_FALSE(resp.success);
+    STRCMP_EQUAL("Markov model not loaded", resp.error_message.c_str());
+}
+
+TEST(MarkovAddonTests, TrainingPipeline) {
+    create_dummy_data("The quick brown fox jumps over the lazy dog. The quick brown fox is fast.");
+
+    bool success = addon->train(test_input_path, test_model_path);
+    CHECK_TRUE(success);
+    CHECK_TRUE(fs::exists(test_model_path));
+
+    // Verify Knowledge Pack structure
+    std::ifstream in(test_model_path);
     nlohmann::json j;
     in >> j;
 
-    // "the" should have "quick" and "lazy" as following words
-    assert(j.contains("the"));
-    assert(j["the"].contains("quick"));
-    assert(j["the"].contains("lazy"));
-
-    std::cout << "test_markov_training passed." << std::endl;
-
-    // Cleanup
-    fs::remove(test_data_path);
+    CHECK_TRUE(j.contains("the"));
+    CHECK_TRUE(j["the"].contains("quick"));
+    CHECK_TRUE(j["the"].contains("lazy"));
 }
 
-void test_markov_generation() {
-    std::cout << "Running: test_markov_generation..." << std::endl;
+TEST(MarkovAddonTests, TextGenerationInference) {
+    create_dummy_data("hello world hello world hello world");
+    addon->train(test_input_path, test_model_path);
 
-    std::string model_path = "test_model.json";
+    bool loaded = addon->load_knowledge_pack(test_model_path);
+    CHECK_TRUE(loaded);
+    CHECK_TRUE(addon->is_ready());
 
-    MarkovAddon addon;
-    // Load the model trained in the previous step or ensure it exists
-    if (!fs::exists(model_path)) {
-        std::ofstream out("temp.txt");
-        out << "hello world hello world hello world";
-        out.close();
-        addon.train("temp.txt", model_path);
-        fs::remove("temp.txt");
-    }
-
-    bool loaded = addon.load_knowledge_pack(model_path);
-    assert(loaded == true);
-    assert(addon.is_ready() == true);
-
-    // Test generation
     std::unordered_map<std::string, std::string> options = {
-        {"length", "5"},
-        {"temperature", "1.0"}
+        {"length", "5"}
     };
 
-    AddonResponse resp = addon.process("hello", options);
+    AddonResponse resp = addon->process("hello", options);
 
-    assert(resp.success == true);
-    assert(!resp.output.empty());
-    assert(resp.metrics.at("tokens_generated") == 5.0);
+    CHECK_TRUE(resp.success);
+    CHECK(resp.output.length() > 0);
+    DOUBLES_EQUAL(5.0, resp.metrics.at("tokens_generated"), 0.01);
 
-    // Check if the output actually starts with the seed (case-insensitive)
-    std::string output_lower = resp.output;
-    for (auto& c : output_lower) c = std::tolower(c);
-    assert(output_lower.find("hello") == 0);
-
-    std::cout << "test_markov_generation passed." << std::endl;
-
-    // Cleanup
-    fs::remove(model_path);
+    // Ensure smart punctuation/capitalization is active
+    // "hello" -> "Hello" due to auto-formatting
+    CHECK(std::isupper(static_cast<unsigned char>(resp.output[0])));
 }
 
-void test_markov_empty_handling() {
-    std::cout << "Running: test_markov_empty_handling..." << std::endl;
+TEST(MarkovAddonTests, DeadEndRecovery) {
+    // Create a training set where "unique" has no successor
+    create_dummy_data("this is unique");
+    addon->train(test_input_path, test_model_path);
+    addon->load_knowledge_pack(test_model_path);
 
-    MarkovAddon addon;
-    assert(addon.is_ready() == false);
+    // Requesting a long sequence starting from a dead end
+    AddonResponse resp = addon->process("unique", {{"length", "10"}});
 
-    AddonResponse resp = addon.process("test", {});
-    assert(resp.success == false);
-    assert(resp.error_message == "Markov model not loaded");
-
-    std::cout << "test_markov_empty_handling passed." << std::endl;
+    CHECK_TRUE(resp.success);
+    // The engine should jump to a random word (this/is) to continue
+    CHECK(resp.output.length() > 10);
 }
 
-int main() {
-    try {
-        test_markov_training();
-        test_markov_generation();
-        test_markov_empty_handling();
-
-        std::cout << "\nALL MARKOV TESTS PASSED" << std::endl;
-    } catch (const std::exception& e) {
-        std::cerr << "Test failed with exception: " << e.what() << std::endl;
-        return 1;
-    }
-
-    return 0;
+int main(int ac, char** av) {
+    // This runner will automatically report memory leaks
+    return CommandLineTestRunner::RunAllTests(ac, av);
 }

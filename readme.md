@@ -16,9 +16,51 @@ To do a completely fresh, full build and start the server:
 
 To just rebuild and restart without cleaning:
 
-````bash
+```bash
 ./dev.sh --fastapi
+```
 
+## The Adddon System
+
+The AsyncNLPEngine wrapper is for the FastAPI/Python bridge to prevent long-running generation tasks from blocking the server and to support Real-time Streaming.
+
+- CRTP Pattern: Deep dive into the zero-overhead static polymorphism.
+
+### The CRTP Pattern
+
+The system uses the **Curiously Recurring Template Pattern (CRTP)** to achieve static polymorphism. This avoids the overhead of a virtual function table (vtable) strategy, while still exposing a clean interface to the outside world.
+
+```cpp
+template <typename Derived>
+class NLPAddon : public INLPAddon {
+    // Static dispatch happens here
+    AddonResponse process(...) {
+        return static_cast<Derived*>(this)->process_impl(...);
+    }
+};
+```
+
+### Markov Addon:
+
+    - Punctuation Engine (balance quotes and closes sentences).
+    - Seed Handling works (backwards scanning for the best entry point).
+    - Performance metrics and future roadmap (N-Grams, Binary Packs) // O(1)
+
+### CppUTest Suite
+
+```bash
+./dev.sh --test
+```
+
+```bash
+./build/nlp_tests -v
+```
+
+#### Useful CLI Flags:
+
+- `-v`: Verbose output (lists every test name).
+- `-c`: Colorized output.
+- `-r 5`: Repeat tests 5 times (useful for catching race conditions in the Async engine).
 
 ---
 
@@ -69,7 +111,7 @@ int main() {
     auto sentiment = engine.analyze_sentiment(text, "de");
     auto toxicity = engine.detect_toxicity("You are stupid!", "en");
 }
-````
+```
 
 ---
 
