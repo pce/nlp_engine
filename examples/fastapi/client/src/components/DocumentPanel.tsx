@@ -7,9 +7,10 @@ import AnalysisDashboard from "./analysis/AnalysisDashboard";
 interface DocumentPanelProps {
   content: string;
   onContentChange?: (content: string) => void;
+  isGenerating?: boolean;
 }
 
-const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
+const DocumentPanel = ({ content, onContentChange, isGenerating }: DocumentPanelProps) => {
   // Initialize document state using the model helper
   const [doc, setDoc] = useState<DocumentState>(() => DocumentModel.createInitialState("Analysis Workspace", content));
   const [selectedText, setSelectedText] = useState<string>("");
@@ -189,7 +190,21 @@ const DocumentPanel = ({ content, onContentChange }: DocumentPanelProps) => {
 
         <div className="p-4">
           {activeTab === "editor" ? (
-            <div className="animate-in fade-in duration-300">
+            <div className="animate-in fade-in duration-300 relative">
+              {isGenerating && (
+                <div className="absolute inset-0 z-10 bg-white/50 dark:bg-slate-900/50 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-indigo-500/30 animate-pulse">
+                  <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl border border-indigo-100 dark:border-indigo-900/50 max-w-lg w-full m-4">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" />
+                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">Native Markov Stream</span>
+                    </div>
+                    <div className="text-sm leading-relaxed text-slate-600 dark:text-slate-300 font-serif italic">
+                      {content.slice(-300)}
+                      <span className="inline-block w-1.5 h-4 ml-1 bg-indigo-500 animate-pulse" />
+                    </div>
+                  </div>
+                </div>
+              )}
               <textarea
                 value={doc.content}
                 onChange={(e) => handleContentChange(e.target.value)}

@@ -9,21 +9,38 @@ interface HeaderProps {
   setSidebarOpen: (open: boolean) => void;
   active: (path: string) => string;
   onContentChange?: (content: string) => void;
+  isGenerating?: boolean;
+  setIsGenerating?: (val: boolean) => void;
 }
 
 /**
  * Header Component
  * Handles the top-level navigation, sidebar toggling, and system status display.
  */
-const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentChange }) => {
+const Header: React.FC<HeaderProps> = ({
+  sidebarOpen,
+  setSidebarOpen,
+  onContentChange,
+  isGenerating: externalIsGenerating,
+  setIsGenerating: setExternalIsGenerating,
+}) => {
   const [isMarkovOpen, setIsMarkovOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [internalIsGenerating, setInternalIsGenerating] = useState(false);
+
+  const isGenerating = externalIsGenerating !== undefined ? externalIsGenerating : internalIsGenerating;
+  const setIsGenerating = setExternalIsGenerating || setInternalIsGenerating;
+
   const { theme, setTheme, availableThemes } = useTheme();
   const [sessionId] = useState(() => `session_${Math.random().toString(36).substring(2, 11)}`);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("generic_novel");
+  const [genOptions, setGenOptions] = useState({
+    length: 150,
+    useHybrid: false,
+    top_p: 0.9,
+  });
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch available models on mount
@@ -79,9 +96,13 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentC
       await nlpService.generateMarkovStream(
         {
           seed: seed || "The",
-          length: 150,
+          length: genOptions.length,
           model: selectedModel,
           session_id: sessionId,
+          options: {
+            use_hybrid: genOptions.useHybrid ? "true" : "false",
+            top_p: genOptions.top_p.toString(),
+          },
         },
         (chunk, is_final) => {
           accumulated += chunk;
@@ -157,7 +178,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentC
             </button>
 
             {isMarkovOpen && (
-              <div className="absolute right-0 mt-3 w-64 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 py-3 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
+              <div className="absolute right-0 mt-3 w-72 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 py-3 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
                 <div className="px-4 pb-2 mb-2 border-b border-slate-100 dark:border-slate-700">
                   <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Knowledge Pack</span>
                   <div className="mt-2 grid grid-cols-1 gap-1">
@@ -177,7 +198,35 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentC
                   </div>
                 </div>
 
-                <div className="px-2 space-y-1">
+                <div className="px-4 py-3 space-y-3 border-b border-slate-100 dark:border-slate-700">
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Generation Tuning</span>
+
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-bold text-slate-500">Hybrid Vector Mode</span>
+                      <button
+                        onClick={() => setGenOptions((prev) => ({ ...prev, useHybrid: !prev.useHybrid }))}
+                        className={`w-8 h-4 rounded-full transition-colors relative ${genOptions.useHybrid ? "bg-indigo-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                      >
+                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${genOptions.useHybrid ? "left-4.5" : "left-0.5"}`} />
+                      </button>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-bold text-slate-500">Max Length: {genOptions.length}</span>
+                      <input
+                        type="range"
+                        min="50"
+                        max="500"
+                        step="50"
+                        value={genOptions.length}
+                        onChange={(e) => setGenOptions((prev) => ({ ...prev, length: parseInt(e.target.value) }))}
+                        className="w-24 accent-indigo-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="px-2 pt-2 space-y-1">
                   <button
                     onClick={() => handleGenerate(false)}
                     disabled={isGenerating}

@@ -28,19 +28,7 @@ const StatsDashboard: React.FC = () => {
         if (!response.ok) throw new Error("Health check failed");
         const data = await response.json();
 
-        // Mocking task data for UI demonstration since the backend only reports thread count currently
-        const enhancedStats = {
-          ...data.stats,
-          active_tasks:
-            data.stats.threads > 1
-              ? [
-                  { id: "task_" + Math.random().toString(16).slice(2, 8), type: "MarkovGen", elapsed: 1.2 },
-                  { id: "task_" + Math.random().toString(16).slice(2, 8), type: "Inference", elapsed: 0.5 },
-                ]
-              : [],
-        };
-
-        setStats(enhancedStats);
+        setStats(data.stats);
         setError(false);
       } catch (e) {
         console.error("Stats fetch failed", e);

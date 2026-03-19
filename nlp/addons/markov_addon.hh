@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <cmath>
 #include <nlohmann/json.hpp>
 #include "vector_addon.hh"
 
@@ -19,25 +20,30 @@ using json = nlohmann::json;
 
 /**
  * @class MarkovAddon
- * @brief High-performance C++23 Markov Chain Text Generator.
+ * @brief High-performance C++23 Markov Chain Text Generator with N-Gram support.
  *
- * Implements the NLPAddon CRTP interface. This addon is designed to be
- * read-only at runtime once a "Knowledge Pack" is loaded.
+ * This version supports:
+ * 1. Variable N-Grams (Bigrams, Trigrams, etc.)
+ * 2. Softmax Temperature Sampling for creativity control.
+ * 3. Nucleus (Top-P) Sampling.
+ * 4. Hybrid Semantic Filtering via VectorAddon.
  */
 class MarkovAddon : public NLPAddon<MarkovAddon>, public ITrainable {
 private:
-    // N-Gram support: Sequence of words -> { NextWord: Frequency }
-    // Using a space-separated string as key for the n-gram sequence
+    /**
+     * @brief Internal state for the Markov model.
+     * Maps an N-Gram sequence (joined by space) to a map of next words and their frequencies.
+     */
     std::unordered_map<std::string, std::unordered_map<std::string, uint32_t>> chain_;
 
-    // Cached total counts for faster probability normalization
-    std::unordered_map<std::string, uint64_t> totals_;
+    // Configurable N-Gram size (default to 2 for bigrams, 3 for trigrams)
+    size_t n_gram_size_ = 2;
 
     // Optional semantic validator
     std::shared_ptr<VectorAddon> vector_engine_;
 
     std::string name_ = "markov_generator";
-    std::string version_ = "1.0.2";
+    std::string version_ = "2.0.0";
     bool ready_ = false;
 
     // Random engine for generation
@@ -57,10 +63,23 @@ private:
      */
     std::string clean_word(std::string s) const {
         s = to_lower(s);
+        // Keep alphanumeric for tokens
         s.erase(std::remove_if(s.begin(), s.end(),
-                               [](unsigned char c){ return std::ispunct(c); }),
+                               [](unsigned char c){ return std::ispunct(c) && c != '\'' && c != '-'; }),
                 s.end());
         return s;
+    }
+
+    /**
+     * @brief Joins a window of words into a single key string.
+     */
+    std::string join_window(const std::vector<std::string>& window) const {
+        std::string result;
+        for (size_t i = 0; i < window.size(); ++i) {
+            result += window[i];
+            if (i < window.size() - 1) result += " ";
+        }
+        return result;
     }
 
 public:
@@ -72,6 +91,11 @@ public:
     const std::string& version_impl() const { return version_; }
 
     void set_name(const std::string& new_name) { name_ = new_name; }
+
+    /**
+     * @brief Set the N-Gram context size. 2 = Bigram, 3 = Trigram.
+     */
+    void set_ngram_size(size_t n) { n_gram_size_ = n; }
 
     /**
      * @brief Attach a vector engine for semantic rule-based post-processing.
@@ -87,8 +111,7 @@ public:
     /**
      * @brief Process text generation based on a seed.
      * @param input The seed word or phrase.
-     * @param options { "length": "50", "temperature": "1.0" }
-     * @param context Optional persistent state for session tracking.
+     * @param options { "length": "50", "temperature": "1.0", "top_p": "0.9", "use_hybrid": "true" }
      */
     void process_stream_impl(const std::string& input,
                             std::function<void(const std::string& chunk, bool is_final)> callback,
@@ -100,169 +123,157 @@ public:
         }
 
         int max_length = options.count("length") ? std::stoi(options.at("length")) : 50;
+        float temperature = options.count("temperature") ? std::stof(options.at("temperature")) : 1.0f;
         float top_p = options.count("top_p") ? std::stof(options.at("top_p")) : 0.9f;
-        float semantic_threshold = options.count("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.0f;
+        bool use_hybrid = options.count("use_hybrid") ? (options.at("use_hybrid") == "true") : false;
+        float semantic_threshold = options.count("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.3f;
 
-        std::string current;
         std::vector<std::string> window;
-
-        // Initialize seed
-        std::istringstream iss(input.empty() && context && !context->history.empty() ? context->history.back() : input);
+        std::istringstream iss(input);
         std::string w;
-        bool first = true;
+
         while (iss >> w) {
             std::string cleaned = clean_word(w);
             if (!cleaned.empty()) {
                 window.push_back(cleaned);
-                callback((first ? "" : " ") + cleaned, false);
-                first = false;
             }
         }
 
+        // Handle empty or too small seed
         if (window.empty()) {
             auto it = chain_.begin();
             std::advance(it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
-            current = it->first;
-            std::string formatted = current;
-            if (!formatted.empty()) formatted[0] = std::toupper(formatted[0]);
-            callback(formatted, false);
-            window.push_back(current);
-        } else {
-            current = window.back();
+            std::istringstream ss(it->first);
+            while (ss >> w) window.push_back(w);
         }
 
-        std::string full_result = input;
+        // Trim window to n_gram_size - 1
+        if (window.size() >= n_gram_size_) {
+            window.erase(window.begin(), window.begin() + (window.size() - (n_gram_size_ - 1)));
+        }
+
+        for (const auto& word : window) callback(word + " ", false);
 
         for (int i = 0; i < max_length; ++i) {
-            auto it = chain_.find(current);
+            std::string key = join_window(window);
+            auto it = chain_.find(key);
+
+            // Backoff strategy: if trigram not found, try bigram, etc.
+            while (it == chain_.end() && !window.empty()) {
+                window.erase(window.begin());
+                key = join_window(window);
+                it = chain_.find(key);
+            }
+
             if (it == chain_.end()) {
-                auto next_it = chain_.begin();
-                std::advance(next_it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
-                current = next_it->first;
-                callback(". " + current, false);
-                full_result += ". " + current;
+                // Total dead end: Jump to random start
+                auto rand_it = chain_.begin();
+                std::advance(rand_it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
+                std::istringstream ss(rand_it->first);
+                window.clear();
+                while (ss >> w) window.push_back(w);
+                callback("... " + window.back() + " ", false);
                 continue;
             }
 
             const auto& possibilities = it->second;
-            std::vector<std::pair<std::string, uint32_t>> candidates(possibilities.begin(), possibilities.end());
-            std::sort(candidates.begin(), candidates.end(), [](auto& a, auto& b) { return a.second > b.second; });
+            std::vector<std::pair<std::string, float>> scored_candidates;
 
-            if (vector_engine_ && semantic_threshold > 0.0f) {
-                auto filtered = candidates;
-                candidates.clear();
-                for (const auto& cand : filtered) {
-                    if (vector_engine_->calculate_similarity(current, cand.first) >= semantic_threshold)
-                        candidates.push_back(cand);
+            // 1. Temperature-based Softmax Scoring
+            float sum_exp = 0.0f;
+            for (const auto& [word, freq] : possibilities) {
+                float score = std::pow(static_cast<float>(freq), 1.0f / std::max(0.01f, temperature));
+                scored_candidates.push_back({word, score});
+                sum_exp += score;
+            }
+
+            // Normalize
+            for (auto& cand : scored_candidates) cand.second /= sum_exp;
+
+            // 2. Hybrid Semantic Filtering
+            if (use_hybrid && vector_engine_ && !window.empty()) {
+                std::string context_word = window.back();
+                for (auto& cand : scored_candidates) {
+                    float sim = vector_engine_->calculate_similarity(context_word, cand.first);
+                    if (sim < semantic_threshold) cand.second *= 0.1f; // Penalty
                 }
-                if (candidates.empty()) candidates = filtered;
             }
 
-            uint64_t total = 0;
-            for (const auto& c : candidates) total += c.second;
-            uint64_t running_total = 0;
-            uint64_t target_cutoff = static_cast<uint64_t>(total * top_p);
-            std::vector<std::pair<std::string, uint32_t>> nucleus;
+            // 3. Sort for Nucleus Sampling
+            std::sort(scored_candidates.begin(), scored_candidates.end(),
+                     [](const auto& a, const auto& b) { return a.second > b.second; });
 
-            for (const auto& c : candidates) {
-                nucleus.push_back(c);
-                running_total += c.second;
-                if (running_total >= target_cutoff) break;
+            // 4. Top-P (Nucleus) Filter
+            float cumulative = 0.0f;
+            std::vector<std::pair<std::string, float>> nucleus;
+            for (const auto& cand : scored_candidates) {
+                nucleus.push_back(cand);
+                cumulative += cand.second;
+                if (cumulative >= top_p) break;
             }
 
-            std::uniform_int_distribution<uint64_t> dist(1, std::max((uint64_t)1, running_total));
-            uint64_t target = dist(gen_);
-            uint64_t cumulative = 0;
+            // 5. Random Sample from Nucleus
+            std::uniform_real_distribution<float> dist(0.0f, cumulative);
+            float target = dist(gen_);
+            float current_sum = 0.0f;
             std::string next_word;
 
-            for (const auto& c : nucleus) {
-                cumulative += c.second;
-                if (cumulative >= target) {
-                    next_word = c.first;
+            for (const auto& cand : nucleus) {
+                current_sum += cand.second;
+                if (current_sum >= target) {
+                    next_word = cand.first;
                     break;
                 }
             }
 
-            if (next_word.empty()) break;
+            if (next_word.empty()) next_word = nucleus.front().first;
 
-            callback(" " + next_word, false);
-            full_result += " " + next_word;
-            current = next_word;
+            callback(next_word + " ", false);
+
+            // Advance window
+            window.push_back(next_word);
+            if (window.size() >= n_gram_size_) {
+                window.erase(window.begin());
+            }
         }
 
-        if (context) context->history.push_back(full_result);
-        callback(".", true);
+        callback("", true);
     }
 
     AddonResponse process_impl(const std::string& input,
                               const std::unordered_map<std::string, std::string>& options,
                               std::shared_ptr<AddonContext> context = nullptr) {
-        if (!ready_) return {"", false, "Markov model not loaded", {}};
-
-        int max_length = options.count("length") ? std::stoi(options.at("length")) : 50;
-        float top_p = options.count("top_p") ? std::stof(options.at("top_p")) : 0.9f;
-        float semantic_threshold = options.count("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.0f;
-
-        // Use context history if available to influence seed selection
-        std::string effective_seed = input;
-        if (effective_seed.empty() && context && !context->history.empty()) {
-            effective_seed = context->history.back();
-        }
-
-        std::string result = generate_text_advanced(effective_seed, max_length, top_p, semantic_threshold);
-
-        // Update context history for follow-up calls
-        if (context && !result.empty()) {
-            context->history.push_back(result);
-        }
+        std::string result;
+        process_stream_impl(input, [&](const std::string& chunk, bool is_final) {
+            if (!is_final) result += chunk;
+        }, options, context);
 
         AddonResponse resp;
         resp.output = result;
         resp.success = true;
-        resp.metrics["tokens_generated"] = static_cast<double>(max_length);
         return resp;
     }
 
-    /**
-     * @brief Checks if a Knowledge Pack is currently loaded.
-     */
     bool is_ready() const override { return ready_; }
 
-    // --- Model Management (Read-Only) ---
-
     /**
-     * @brief Loads a pre-trained JSON Knowledge Pack.
-     * @param path File path to the JSON model.
+     * @brief Loads a Knowledge Pack from JSON.
      */
     bool load_knowledge_pack(const std::string& path) {
         std::ifstream file(path);
         if (!file.is_open()) return false;
 
         json data;
-        try {
-            file >> data;
-        } catch (...) {
-            return false;
-        }
+        try { file >> data; } catch (...) { return false; }
 
         chain_.clear();
-        totals_.clear();
+        if (data.contains("ngram_size")) n_gram_size_ = data["ngram_size"];
 
-        for (auto it = data.begin(); it != data.end(); ++it) {
-            std::string word = clean_word(it.key());
-            if (word.empty()) continue;
-
-            uint64_t word_total = 0;
+        auto model_data = data.contains("data") ? data["data"] : data;
+        for (auto it = model_data.begin(); it != model_data.end(); ++it) {
+            std::string key = it.key();
             for (auto next_it = it.value().begin(); next_it != it.value().end(); ++next_it) {
-                uint32_t freq = next_it.value();
-                std::string next_word = clean_word(next_it.key());
-                if (next_word.empty()) continue;
-
-                chain_[word][next_word] = freq;
-                word_total += freq;
-            }
-            if (word_total > 0) {
-                totals_[word] = word_total;
+                chain_[key][next_it.key()] = next_it.value();
             }
         }
 
@@ -270,191 +281,46 @@ public:
         return ready_;
     }
 
-    // --- ITrainable Implementation ---
-
     /**
-     * @brief Trains a Markov model from source text and exports to JSON.
+     * @brief Trains a model using N-Grams.
      */
     bool train(const std::string& source_path, const std::string& model_output_path) override {
         std::ifstream file(source_path);
         if (!file.is_open()) return false;
 
-        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-
-        std::istringstream iss(content);
-        std::string prev_word, current_word;
+        std::string word;
+        std::vector<std::string> history;
         std::unordered_map<std::string, std::unordered_map<std::string, uint32_t>> temp_chain;
 
-        while (iss >> current_word) {
-            current_word = clean_word(current_word);
-            if (current_word.empty()) continue;
+        while (file >> word) {
+            word = clean_word(word);
+            if (word.empty()) continue;
 
-            if (!prev_word.empty()) {
-                temp_chain[prev_word][current_word]++;
+            if (history.size() == n_gram_size_ - 1) {
+                std::string key = join_window(history);
+                temp_chain[key][word]++;
             }
-            prev_word = current_word;
+
+            history.push_back(word);
+            if (history.size() >= n_gram_size_) {
+                history.erase(history.begin());
+            }
         }
 
-        if (temp_chain.empty()) return false;
+        json output;
+        output["ngram_size"] = n_gram_size_;
+        output["data"] = temp_chain;
+        output["metadata"] = {
+            {"version", version_},
+            {"engine", "pce_nlp_markov_v2"}
+        };
 
-        json output_data = temp_chain;
         std::ofstream out_file(model_output_path);
-        if (!out_file.is_open()) return false;
-
-        out_file << output_data.dump(2);
+        out_file << output.dump(2);
         return true;
     }
 
     float get_training_progress() const override { return ready_ ? 1.0f : 0.0f; }
-
-private:
-    /**
-     * @brief Advanced text generation with Nucleus Sampling (Top-P) and Semantic Filtering.
-     */
-    std::string generate_text_advanced(const std::string& seed, int max_length, float top_p, float semantic_threshold) {
-        if (chain_.empty()) return "";
-
-        std::string current;
-        std::stringstream ss;
-        std::vector<std::string> window; // Slinding window for n-gram context
-
-        // Initialize seed
-        std::istringstream iss(seed);
-        std::string w;
-        while (iss >> w) {
-            std::string cleaned = clean_word(w);
-            if (!cleaned.empty()) {
-                window.push_back(cleaned);
-                if (ss.tellp() > 0) ss << " ";
-                ss << cleaned;
-            }
-        }
-
-        if (window.empty()) {
-            auto it = chain_.begin();
-            std::advance(it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
-            current = it->first;
-            ss << current;
-            window.push_back(current);
-        } else {
-            current = window.back();
-        }
-
-        for (int i = 0; i < max_length; ++i) {
-            auto it = chain_.find(current);
-            if (it == chain_.end()) {
-                // Dead end jump
-                auto next_it = chain_.begin();
-                std::advance(next_it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
-                current = next_it->first;
-                ss << ". " << current;
-                window = {current};
-                continue;
-            }
-
-            const auto& possibilities = it->second;
-            std::vector<std::pair<std::string, uint32_t>> candidates(possibilities.begin(), possibilities.end());
-
-            // Sort by frequency for Top-P sampling
-            std::sort(candidates.begin(), candidates.end(), [](auto& a, auto& b) {
-                return a.second > b.second;
-            });
-
-            // Apply Semantic Filtering if Vector Engine is attached
-            if (vector_engine_ && semantic_threshold > 0.0f) {
-                auto filtered = candidates;
-                candidates.clear();
-                for (const auto& cand : filtered) {
-                    float sim = vector_engine_->calculate_similarity(current, cand.first);
-                    if (sim >= semantic_threshold) {
-                        candidates.push_back(cand);
-                    }
-                }
-                if (candidates.empty()) candidates = filtered; // Fallback if all filtered
-            }
-
-            // Nucleus Sampling (Top-P)
-            uint64_t total = 0;
-            for (const auto& c : candidates) total += c.second;
-
-            uint64_t running_total = 0;
-            uint64_t target_cutoff = static_cast<uint64_t>(total * top_p);
-            std::vector<std::pair<std::string, uint32_t>> nucleus;
-
-            for (const auto& c : candidates) {
-                nucleus.push_back(c);
-                running_total += c.second;
-                if (running_total >= target_cutoff) break;
-            }
-
-            // Sample from nucleus
-            std::uniform_int_distribution<uint64_t> dist(1, std::max((uint64_t)1, running_total));
-            uint64_t target = dist(gen_);
-            uint64_t cumulative = 0;
-            std::string next_word;
-
-            for (const auto& c : nucleus) {
-                cumulative += c.second;
-                if (cumulative >= target) {
-                    next_word = c.first;
-                    break;
-                }
-            }
-
-            if (next_word.empty()) break;
-
-            ss << " " << next_word;
-            current = next_word;
-        }
-
-        return finalize_text(ss.str());
-    }
-
-    /**
-     * @brief Internal text generation logic using weighted random sampling.
-     * Handles multi-word seeds by taking the last known valid word.
-     */
-    std::string generate_text(const std::string& seed, int max_length) {
-        return generate_text_advanced(seed, max_length, 1.0f, 0.0f);
-    }
-
-    /**
-     * @brief Post-processing for punctuation and formatting.
-     */
-    std::string finalize_text(std::string res) {
-        if (res.empty()) return "";
-
-        // Capitalize first letter
-        if (std::islower(static_cast<unsigned char>(res[0]))) {
-            res[0] = std::toupper(static_cast<unsigned char>(res[0]));
-        }
-
-        // Balance quotes: remove leading/trailing lone quotes and ensure pairs
-        size_t quote_count = std::count(res.begin(), res.end(), '"');
-        if (quote_count % 2 != 0) {
-            // If it starts with a quote but doesn't end with one, add one
-            if (res.front() == '"') res += '"';
-            // If it ends with a quote but doesn't start with one, add one
-            else if (res.back() == '"') res = '"' + res;
-            // Otherwise, just strip all quotes to be safe
-            else res.erase(std::remove(res.begin(), res.end(), '"'), res.end());
-        }
-
-        // Ensure it ends with a sentence-ending punctuation
-        if (!res.empty()) {
-            char last = res.back();
-            if (last != '.' && last != '!' && last != '?' && last != '"') {
-                res += ".";
-            } else if (last == '"' && res.size() > 1) {
-                char prev = res[res.size() - 2];
-                if (prev != '.' && prev != '!' && prev != '?') {
-                    res.insert(res.size() - 1, ".");
-                }
-            }
-        }
-
-        return res;
-    }
 };
 
 } // namespace pce::nlp

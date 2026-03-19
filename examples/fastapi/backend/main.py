@@ -220,6 +220,8 @@ async def generate_text_stream(
 @app.post("/semantic")
 async def semantic_analysis(request: ProcessingRequest):
     """Semantic: Perform vector-based operations (similarity, clustering, outliers)"""
+    task_id = f"vec_{int(time.time() * 1000)}"
+    active_tasks_tracker[task_id] = {"type": "VectorEngine", "start": time.time()}
     try:
         # Default to vector_engine if no specific addon provided
         method = request.plugin if request.plugin != "default" else "vector_engine"
@@ -279,6 +281,8 @@ async def stream_results(
         loop.call_soon_threadsafe(queue.put_nowait, {"chunk": chunk, "is_final": is_final})
 
     async def event_generator():
+        task_id = f"stream_{int(time.time() * 1000)}"
+        active_tasks_tracker[task_id] = {"type": "LinguisticStream", "start": time.time()}
         try:
             # Start the native streaming process
             # The engine will trigger 'cpp_callback' multiple times
@@ -296,6 +300,8 @@ async def stream_results(
         except Exception as e:
             logger.error(f"Error in SSE event generator: {e}")
             yield f"data: {json.dumps({'chunk': '', 'is_final': True, 'error': str(e)})}\n\n"
+        finally:
+            active_tasks_tracker.pop(task_id, None)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

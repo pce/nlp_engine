@@ -39,7 +39,7 @@ for arg in "$@"; do
   case "$arg" in
     clean)        CLEAN=1 ;;
     --python)     BUILD_PYTHON=1 ;;
-    --fastapi)    BUILD_PYTHON=1; BUILD_CLIENT=1; RUN_FASTAPI=1 ;;
+    --fastapi)    BUILD_PYTHON=1; BUILD_CLIENT=1; RUN_FASTAPI=1; RUN_TESTS=1 ;;
     --test)       RUN_TESTS=1 ;;
     --client)     BUILD_CLIENT=1 ;;
     --release)    BUILD_TYPE="Release" ;;

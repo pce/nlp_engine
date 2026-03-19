@@ -104,10 +104,15 @@ add_executable(nlp_trainer training/nlp_trainer.cpp)
 target_link_libraries(nlp_trainer PRIVATE nlp_engine)
 add_dependencies(nlp_trainer prepare_data)
 
-# Example: nlp_example_train
-add_executable(nlp_example_train examples/train/main.cpp)
+# Example: nlp_example_train (Offline Training)
+add_executable(nlp_example_train examples/train/train.cpp)
 target_link_libraries(nlp_example_train PRIVATE nlp_engine)
 add_dependencies(nlp_example_train prepare_data)
+
+# Example: nlp_example_textgen (Inference & Benchmarking)
+add_executable(nlp_example_textgen examples/train/textgen.cpp)
+target_link_libraries(nlp_example_textgen PRIVATE nlp_engine)
+add_dependencies(nlp_example_textgen prepare_data)
 
 # -----------------------------------------------------------------------------
 # Tests

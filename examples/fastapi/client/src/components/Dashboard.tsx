@@ -12,6 +12,7 @@ import Icon from "./Icon";
 const Dashboard: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [documentContent, setDocumentContent] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
 
   // active navigation styling (TODO expand with a router)
   const activeLink = (path: string) => (window.location.pathname === path ? "text-indigo-600 font-bold" : "text-slate-500 hover:text-indigo-500");
@@ -34,7 +35,14 @@ const Dashboard: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} active={activeLink} onContentChange={setDocumentContent} />
+        <Header
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          active={activeLink}
+          onContentChange={setDocumentContent}
+          isGenerating={isGenerating}
+          setIsGenerating={setIsGenerating}
+        />
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 scrollbar-thin">
           <div className="max-w-5xl mx-auto space-y-8">
@@ -64,7 +72,7 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Central Editor/Analysis Workspace */}
-            <DocumentPanel content={documentContent} onContentChange={setDocumentContent} />
+            <DocumentPanel content={documentContent} onContentChange={setDocumentContent} isGenerating={isGenerating} />
 
             {/* TODO Quick Stats */}
           </div>
