@@ -39,8 +39,8 @@ const Header: React.FC<HeaderProps> = ({
   const [genOptions, setGenOptions] = useState({
     length: 150,
     useHybrid: false,
-    top_p: 0.9,
     temperature: 1.0,
+    top_p: 0.9,
     nGram: 2,
   });
   const markovRef = useRef<HTMLDivElement>(null);
@@ -146,8 +146,7 @@ const Header: React.FC<HeaderProps> = ({
           request,
           (chunk, is_final) => {
             accumulated += chunk;
-            if (onContentChange && response.output) {
-              console.log("Batch generation complete:", response.output);
+            if (onContentChange) {
               onContentChange(baseText + accumulated);
             }
             if (is_final) setIsGenerating(false);

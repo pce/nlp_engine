@@ -42,31 +42,16 @@ class NLPAddon : public INLPAddon {
 
 ### `MarkovAddon`
 
-    - Punctuation Engine (balance quotes and closes sentences).
-    - Seed Handling works (backwards scanning for the best entry point).
-    - Performance metrics and future roadmap (N-Grams, Binary Packs) // O(1)
+- **Statistical Style**: Captures texture and style via N-Gram probabilities.
 
-The system is moving beyond a simple word-shuffler into a more advanced linguistic generator.
-Try setting it to **Trigram** with a **Temperature of 0.8** for the best balance of coherence and variety.
+> [!NOTE]
+> **Coherence Gap**: Current output lacks a logical event flow (no beam search or nucleus sampling with coherence constraints).
 
-### Softmax Temperature Sampling
+A Postprocess-Step with Neural LM-based rewriting can restrucure, add entities, meaning out of the "word salad" like:
 
-- Low Temperature (0.1 - 0.5): Makes the engine very predictable and "safe," picking only the highest-probability words.
+> the wood “it’s no pleasure to look round” chapter i will make me fresh instance of an air and seeing him in reply “...
 
-- High Temperature (1.2 - 2.0): Increases "creativity" and randomness, allowing the engine to pick lower-probability words, leading to more surreal or experimental output.
-
-### Nucleus (Top-P) Refinement
-
-The Top-P sampling works in tandem with the Softmax scores.
-It filters the "long tail" of unlikely words before the random selection happens, ensuring that even at high temperatures, the output remains somewhat grounded in the training data.
-
-### variable N-Gram sizes
-
-- Trigrams (3-Gram): Moving from 1-word context (bigrams) to 2-word context significantly improves text coherence and "sentence logic".
-- Dynamic Training: The model now saves the `ngram_size` in the Knowledge Pack JSON.
-- Backoff Strategy: If a specific trigram sequence isn't found during generation, the engine gracefully "backs off" to a bigram or unigram to avoid dead ends.
-
-Retrain Workflow Example
+### Retrain Workflow Example
 
 1. **Paste Source**: Paste a technical manual or a poem into the editor.
 2. **Select Context**: Set the N-Gram context to **TRI** for better sentence structure.

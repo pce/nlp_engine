@@ -138,13 +138,15 @@ public:
         }
 
         std::vector<std::string> window;
-        std::istringstream iss(input);
         std::string w;
 
-        while (iss >> w) {
-            std::string cleaned = clean_word(w);
-            if (!cleaned.empty()) {
-                window.push_back(cleaned);
+        {
+            std::istringstream iss(input);
+            while (iss >> w) {
+                std::string cleaned = clean_word(w);
+                if (!cleaned.empty()) {
+                    window.push_back(cleaned);
+                }
             }
         }
 
@@ -158,14 +160,19 @@ public:
             std::advance(it, std::uniform_int_distribution<size_t>(0, std::max((size_t)0, chain_.size() - 1))(gen_));
             std::istringstream ss(it->first);
             while (ss >> w) window.push_back(w);
+        } else {
+            // Emit initial seed tokens to the stream only if user provided seed
+            for (const auto& word : window) callback(word + " ", false);
         }
-
-        // Emit initial seed tokens to the stream
-        for (const auto& word : window) callback(word + " ", false);
 
         // Ensure we don't exceed the required history for the N-Gram key
         if (window.size() >= n_gram_size_) {
             window.erase(window.begin(), window.begin() + (window.size() - (n_gram_size_ - 1)));
+        }
+
+        if (window.empty()) {
+            callback("Error: Seed processing failed to produce window.", true);
+            return;
         }
 
         std::cout << "[Debug] Initial window: [" << join_window(window) << "]" << std::endl;
@@ -186,7 +193,8 @@ public:
                 it = chain_.find(key);
             }
 
-            if (it == chain_.end() || it->second.empty()) {
+            // If we still didn't find a key OR the window became empty, force a jump
+            if (it == chain_.end() || it->second.empty() || window.empty()) {
                 // Total dead end: Jump to random start
                 auto rand_it = chain_.begin();
                 if (rand_it == chain_.end()) break;
