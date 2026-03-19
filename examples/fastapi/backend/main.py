@@ -169,6 +169,53 @@ async def generate_text(request: ProcessingRequest):
             return {"output": res, "status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        active_tasks_tracker.pop(task_id, None)
+
+@app.get("/generate-stream")
+async def generate_text_stream(
+    seed: str,
+    model: str = "generic_novel",
+    length: int = 150,
+    top_p: float = 0.9,
+    semantic_filter: float = 0.0,
+    session_id: Optional[str] = None
+):
+    """
+    Stream Markov generation word-by-word.
+    """
+    task_id = f"gen_stream_{int(time.time() * 1000)}"
+    active_tasks_tracker[task_id] = {"type": "MarkovStream", "start": time.time()}
+
+    options = {
+        "length": str(length),
+        "top_p": str(top_p),
+        "semantic_filter": str(semantic_filter)
+    }
+
+    queue = asyncio.Queue()
+    loop = asyncio.get_event_loop()
+
+    def cpp_callback(chunk: str, is_final: bool):
+        loop.call_soon_threadsafe(queue.put_nowait, {"chunk": chunk, "is_final": is_final})
+
+    async def event_generator():
+        try:
+            # Start the native streaming generation
+            engine.stream_text(seed, model, cpp_callback, options, session_id or "")
+
+            while True:
+                data = await queue.get()
+                yield f"data: {json.dumps(data)}\n\n"
+                if data.get("is_final"):
+                    break
+        except Exception as e:
+            logger.error(f"Error in Markov stream: {e}")
+            yield f"data: {json.dumps({'chunk': '', 'is_final': True, 'error': str(e)})}\n\n"
+        finally:
+            active_tasks_tracker.pop(task_id, None)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/semantic")
 async def semantic_analysis(request: ProcessingRequest):

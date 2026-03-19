@@ -90,6 +90,110 @@ public:
      * @param options { "length": "50", "temperature": "1.0" }
      * @param context Optional persistent state for session tracking.
      */
+    void process_stream_impl(const std::string& input,
+                            std::function<void(const std::string& chunk, bool is_final)> callback,
+                            const std::unordered_map<std::string, std::string>& options,
+                            std::shared_ptr<AddonContext> context = nullptr) {
+        if (!ready_) {
+            callback("Error: Markov model not loaded", true);
+            return;
+        }
+
+        int max_length = options.count("length") ? std::stoi(options.at("length")) : 50;
+        float top_p = options.count("top_p") ? std::stof(options.at("top_p")) : 0.9f;
+        float semantic_threshold = options.count("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.0f;
+
+        std::string current;
+        std::vector<std::string> window;
+
+        // Initialize seed
+        std::istringstream iss(input.empty() && context && !context->history.empty() ? context->history.back() : input);
+        std::string w;
+        bool first = true;
+        while (iss >> w) {
+            std::string cleaned = clean_word(w);
+            if (!cleaned.empty()) {
+                window.push_back(cleaned);
+                callback((first ? "" : " ") + cleaned, false);
+                first = false;
+            }
+        }
+
+        if (window.empty()) {
+            auto it = chain_.begin();
+            std::advance(it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
+            current = it->first;
+            std::string formatted = current;
+            if (!formatted.empty()) formatted[0] = std::toupper(formatted[0]);
+            callback(formatted, false);
+            window.push_back(current);
+        } else {
+            current = window.back();
+        }
+
+        std::string full_result = input;
+
+        for (int i = 0; i < max_length; ++i) {
+            auto it = chain_.find(current);
+            if (it == chain_.end()) {
+                auto next_it = chain_.begin();
+                std::advance(next_it, std::uniform_int_distribution<size_t>(0, chain_.size() - 1)(gen_));
+                current = next_it->first;
+                callback(". " + current, false);
+                full_result += ". " + current;
+                continue;
+            }
+
+            const auto& possibilities = it->second;
+            std::vector<std::pair<std::string, uint32_t>> candidates(possibilities.begin(), possibilities.end());
+            std::sort(candidates.begin(), candidates.end(), [](auto& a, auto& b) { return a.second > b.second; });
+
+            if (vector_engine_ && semantic_threshold > 0.0f) {
+                auto filtered = candidates;
+                candidates.clear();
+                for (const auto& cand : filtered) {
+                    if (vector_engine_->calculate_similarity(current, cand.first) >= semantic_threshold)
+                        candidates.push_back(cand);
+                }
+                if (candidates.empty()) candidates = filtered;
+            }
+
+            uint64_t total = 0;
+            for (const auto& c : candidates) total += c.second;
+            uint64_t running_total = 0;
+            uint64_t target_cutoff = static_cast<uint64_t>(total * top_p);
+            std::vector<std::pair<std::string, uint32_t>> nucleus;
+
+            for (const auto& c : candidates) {
+                nucleus.push_back(c);
+                running_total += c.second;
+                if (running_total >= target_cutoff) break;
+            }
+
+            std::uniform_int_distribution<uint64_t> dist(1, std::max((uint64_t)1, running_total));
+            uint64_t target = dist(gen_);
+            uint64_t cumulative = 0;
+            std::string next_word;
+
+            for (const auto& c : nucleus) {
+                cumulative += c.second;
+                if (cumulative >= target) {
+                    next_word = c.first;
+                    break;
+                }
+            }
+
+            if (next_word.empty()) break;
+
+            callback(" " + next_word, false);
+            full_result += " " + next_word;
+            current = next_word;
+        }
+
+        if (context) context->history.push_back(full_result);
+        callback(".", true);
+    }
+
     AddonResponse process_impl(const std::string& input,
                               const std::unordered_map<std::string, std::string>& options,
                               std::shared_ptr<AddonContext> context = nullptr) {

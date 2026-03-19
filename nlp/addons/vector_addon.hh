@@ -48,6 +48,17 @@ public:
     bool is_ready() const override { return ready_; }
 
     /**
+     * @brief Streaming implementation for vector operations (currently returns full result as single chunk).
+     */
+    void process_stream_impl(const std::string& input,
+                            std::function<void(const std::string& chunk, bool is_final)> callback,
+                            const std::unordered_map<std::string, std::string>& options,
+                            std::shared_ptr<AddonContext> context = nullptr) {
+        AddonResponse resp = process_impl(input, options, context);
+        callback(resp.output, true);
+    }
+
+    /**
      * @brief Process semantic operations.
      * Methods: "similarity", "clustering", "outlier_detection", "nearest_neighbors"
      */

@@ -57,38 +57,42 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen, onContentC
     try {
       const textarea = document.querySelector("textarea");
       let seed = "";
-      let currentFullText = "";
+      let initialText = "";
 
       if (textarea) {
-        currentFullText = textarea.value;
+        initialText = textarea.value;
         if (withInput) {
           const start = textarea.selectionStart;
           const end = textarea.selectionEnd;
-          seed = start !== end ? currentFullText.substring(start, end) : currentFullText.slice(-100);
+          seed = start !== end ? initialText.substring(start, end) : initialText.slice(-100);
         }
       }
 
-      const response = await nlpService.generateMarkov({
-        seed: seed || "The",
-        length: 150,
-        model: selectedModel,
-        session_id: sessionId,
-      });
+      let accumulated = "";
+      const separator = withInput && initialText && !initialText.endsWith(" ") ? " " : "";
+      const baseText = withInput ? initialText + separator : "";
 
-      if (response && response.output && onContentChange) {
-        // The previous bug was likely due to grabbing DOM state that included
-        // stale analysis stream results if the user switched tabs rapidly.
-        // We ensure we only ever work with the actual editor content.
-        if (withInput && currentFullText) {
-          const separator = currentFullText.length > 0 && !currentFullText.endsWith(" ") ? " " : "";
-          onContentChange(currentFullText + separator + response.output);
-        } else {
-          onContentChange(response.output);
-        }
-      }
+      await nlpService.generateMarkovStream(
+        {
+          seed: seed || "The",
+          length: 150,
+          model: selectedModel,
+          session_id: sessionId,
+        },
+        (chunk, is_final) => {
+          accumulated += chunk;
+          if (onContentChange) {
+            onContentChange(baseText + accumulated);
+          }
+          if (is_final) setIsGenerating(false);
+        },
+        (err) => {
+          console.error("Streaming error:", err);
+          setIsGenerating(false);
+        },
+      );
     } catch (error) {
-      console.error("Failed to generate Markov text:", error);
-    } finally {
+      console.error("Failed to start Markov stream:", error);
       setIsGenerating(false);
     }
   };

@@ -7,6 +7,7 @@
 #include <variant>
 #include <unordered_map>
 #include <optional>
+#include <functional>
 
 /**
  * @file nlp_addon_system.hh
@@ -54,6 +55,11 @@ public:
     virtual AddonResponse process(const std::string& input,
                                  const std::unordered_map<std::string, std::string>& options = {},
                                  std::shared_ptr<AddonContext> context = nullptr) = 0;
+
+    virtual void process_stream(const std::string& input,
+                               std::function<void(const std::string& chunk, bool is_final)> callback,
+                               const std::unordered_map<std::string, std::string>& options = {},
+                               std::shared_ptr<AddonContext> context = nullptr) = 0;
 };
 
 /**
@@ -82,6 +88,13 @@ public:
                          const std::unordered_map<std::string, std::string>& options = {},
                          std::shared_ptr<AddonContext> context = nullptr) override {
         return static_cast<Derived*>(this)->process_impl(input, options, context);
+    }
+
+    void process_stream(const std::string& input,
+                        std::function<void(const std::string& chunk, bool is_final)> callback,
+                        const std::unordered_map<std::string, std::string>& options = {},
+                        std::shared_ptr<AddonContext> context = nullptr) override {
+        static_cast<Derived*>(this)->process_stream_impl(input, callback, options, context);
     }
 
 protected:

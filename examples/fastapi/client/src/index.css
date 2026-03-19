@@ -2,11 +2,61 @@
 
 @layer base {
     :root {
-        @apply bg-slate-50 dark:bg-slate-950 font-sans antialiased;
+        --theme-bg: theme("colors.slate.50");
+        --theme-surface: theme("colors.white");
+        --theme-border: theme("colors.slate.200");
+        --theme-text: theme("colors.slate.900");
+        --theme-text-muted: theme("colors.slate.500");
+        --theme-primary: theme("colors.indigo.600");
+
+        @apply font-sans antialiased;
+        background-color: var(--theme-bg);
+        color: var(--theme-text);
+    }
+
+    .dark {
+        --theme-bg: theme("colors.slate.950");
+        --theme-surface: theme("colors.slate.900");
+        --theme-border: theme("colors.slate.800");
+        --theme-text: theme("colors.slate.100");
+        --theme-text-muted: theme("colors.slate.400");
+        --theme-primary: theme("colors.indigo.500");
+    }
+
+    /* Solarized Dark */
+    .theme-solarized-dark {
+        --theme-bg: #002b36;
+        --theme-surface: #073642;
+        --theme-border: #586e75;
+        --theme-text: #839496;
+        --theme-text-muted: #657b83;
+        --theme-primary: #268bd2;
+    }
+
+    /* Monokai */
+    .theme-monokai {
+        --theme-bg: #272822;
+        --theme-surface: #3e3d32;
+        --theme-border: #49483e;
+        --theme-text: #f8f8f2;
+        --theme-text-muted: #75715e;
+        --theme-primary: #ae81ff;
+    }
+
+    /* Material Palenight */
+    .theme-material-palenight {
+        --theme-bg: #292d3e;
+        --theme-surface: #32374d;
+        --theme-border: #44475a;
+        --theme-text: #bfc7d5;
+        --theme-text-muted: #676e95;
+        --theme-primary: #82aaff;
     }
 
     body {
         @apply min-h-screen m-0 overflow-hidden;
+        background-color: var(--theme-bg);
+        color: var(--theme-text);
     }
 
     /* Custom scrollbar for a more professional feel */

@@ -197,6 +197,42 @@ class NLPService {
   }
 
   /**
+   * Generates text using a Markov model addon with streaming support.
+   */
+  async generateMarkovStream(request: MarkovRequest, onChunk: (chunk: string, is_final: boolean) => void, onError?: (error: any) => void): Promise<() => void> {
+    const url = new URL(`${this.baseUrl}/generate-stream`);
+    url.searchParams.append("seed", request.seed);
+    url.searchParams.append("model", request.model || "generic_novel");
+    url.searchParams.append("length", String(request.length || 150));
+    if (request.session_id) url.searchParams.append("session_id", request.session_id);
+
+    const eventSource = new EventSource(url.toString());
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+          if (onError) onError(data.error);
+          eventSource.close();
+          return;
+        }
+        onChunk(data.chunk, !!data.is_final);
+        if (data.is_final) eventSource.close();
+      } catch (err) {
+        if (onError) onError(err);
+        eventSource.close();
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      if (onError) onError(err);
+      eventSource.close();
+    };
+
+    return () => eventSource.close();
+  }
+
+  /**
    * Generates text using a Markov model addon.
    */
   async generateMarkov(request: MarkovRequest): Promise<{ output: string; status: string }> {
