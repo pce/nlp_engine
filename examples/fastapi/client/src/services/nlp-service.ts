@@ -23,10 +23,18 @@ export interface MarkovRequest {
   options?: Record<string, string>;
 }
 
+export interface AnalysisHighlight {
+  text: string;
+  offset: number;
+  length: number;
+}
+
 export interface NLPResponse {
-  result: string;
+  output: string;
+  duplicates?: AnalysisHighlight[];
   task_id?: string;
   status: string;
+  metrics?: Record<string, any>;
 }
 
 export interface StreamChunk {
@@ -251,9 +259,40 @@ class NLPService {
   }
 
   /**
+   * Analyzes text for duplicates or patterns using the dedicated /analyze endpoint.
+   */
+  async analyze(request: MarkovRequest): Promise<NLPResponse> {
+    try {
+      const response = await fetch(`${this.baseUrl}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: request.seed,
+          plugin: "deduplication",
+          session_id: request.session_id,
+          options: {
+            ...request.options,
+            mode: "detect",
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || "Analysis failed");
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("NLP Analysis Error:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Generates text using a Markov model addon.
    */
-  async generateMarkov(request: MarkovRequest): Promise<{ output: string; status: string }> {
+  async generateMarkov(request: MarkovRequest): Promise<NLPResponse> {
     try {
       const response = await fetch(`${this.baseUrl}/generate`, {
         method: "POST",

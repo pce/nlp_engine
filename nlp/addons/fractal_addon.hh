@@ -22,7 +22,7 @@ namespace pce::nlp {
  */
 class FractalAddon : public INLPAddon {
 public:
-    FractalAddon() : name_("fractal_generator"), version_("1.0.0-experimental"), depth_(3), segment_length_(20), ready_(false) {
+    FractalAddon() : name_("fractal_generator"), version_("1.1.0"), depth_(3), segment_length_(20), ready_(false) {
         std::random_device rd;
         gen_.seed(rd());
     }
@@ -66,10 +66,12 @@ public:
 
         // Ensure parameters are sane
         depth = std::clamp(depth, 0, 5); // Prevent stack overflow
-        seg_len = std::clamp(seg_len, 5, 100);
+        seg_len = std::clamp(seg_len, 5, 200);
 
         std::cout << "[Fractal] Starting generation. Depth: " << depth << " SegLen: " << seg_len << std::endl;
 
+        // If input is a command like "[Log] Starting analysis...", we might want to strip it or use it as a thematic anchor.
+        // For now, we use the input directly as the seed.
         std::string result = generate_recursive(input, depth, seg_len, options, context);
 
         AddonResponse resp;
@@ -107,19 +109,28 @@ private:
         std::string branch_a = generate_recursive(seed, depth - 1, segment_len, options, context);
 
         // Extract context for Branch B
-        // We use the last 2 words of Branch A to seed Branch B
-        std::string bridge_seed = extract_context(branch_a, 2);
+        // We use the last N words of Branch A to seed Branch B to maintain flow.
+        // If Branch A is empty or short, we fall back to the original seed.
+        int context_words = options.count("n_gram") ? std::stoi(options.at("n_gram")) : 2;
+        std::string bridge_seed = extract_context(branch_a, context_words);
+
+        if (bridge_seed.empty()) {
+            bridge_seed = seed;
+        }
 
         // Branch B: Recursive variation
         std::string branch_b = generate_recursive(bridge_seed, depth - 1, segment_len, options, context);
 
-        // Compose the segments with structural markers
-        std::stringstream ss;
-        ss << branch_a;
-        ss << "\n\n[:: Branch Depth " << depth << " ::]\n\n";
-        ss << branch_b;
+        // Compose the segments
+        std::string result = branch_a;
+        if (!branch_b.empty()) {
+            if (!result.empty() && result.back() != ' ' && result.back() != '\n') {
+                result += " ";
+            }
+            result += branch_b;
+        }
 
-        return ss.str();
+        return result;
     }
 
     /**

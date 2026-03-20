@@ -130,7 +130,16 @@ std::string AsyncNLPEngine::process_sync(
 
             try {
                 auto resp = addon->process(text, options, ctx);
-                return resp.success ? resp.output : "{\"error\": \"" + resp.error_message + "\"}";
+                if (!resp.success) {
+                    return "{\"error\": \"" + resp.error_message + "\"}";
+                }
+
+                nlohmann::json res_json;
+                res_json["output"] = resp.output;
+                res_json["metadata"] = resp.metadata;
+                res_json["metrics"] = resp.metrics;
+                res_json["success"] = true;
+                return res_json.dump();
             } catch (const std::exception& e) {
                 return "{\"error\": \"" + std::string(e.what()) + "\"}";
             }

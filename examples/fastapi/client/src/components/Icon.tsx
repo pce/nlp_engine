@@ -476,21 +476,20 @@ export const Icon: React.FC<IconProps> = ({ name, size = "md", className = "", t
   const sizePixels = ICON_SIZE_MAP[size];
   const IconComponent = ICONS[name];
 
-  if (!IconComponent) {
-    console.warn(`Icon "${name}" not found`);
-    return null;
-  }
-
   return (
     <span
       className={`inline-flex items-center justify-center shrink-0 overflow-hidden ${className}`}
       style={{ width: `${sizePixels}px`, height: `${sizePixels}px` }}
       title={title}
     >
-      <IconComponent
-        {...(others as React.SVGProps<SVGSVGElement>)}
-        style={{ stroke: "currentColor", fill: "none", ...others.style, width: "100%", height: "100%" }}
-      />
+      {IconComponent ? (
+        <IconComponent
+          {...(others as React.SVGProps<SVGSVGElement>)}
+          style={{ stroke: "currentColor", fill: "none", ...others.style, width: "100%", height: "100%" }}
+        />
+      ) : (
+        <span className="w-full h-full border border-current opacity-20 rounded-sm" />
+      )}
     </span>
   );
 };

@@ -1,10 +1,10 @@
-import React, { useState, useRef, useEffect, ReactNode } from "react";
-import Icon from "../Icon";
+import React, { useState, useRef, useEffect, type ReactNode } from "react";
+import Icon, { type IconName } from "../Icon";
 
 interface DropdownProps {
   label: string;
   subLabel?: string;
-  icon?: string;
+  icon?: IconName;
   variant?: "primary" | "warning" | "danger" | "ghost";
   children: ReactNode;
   align?: "left" | "right";

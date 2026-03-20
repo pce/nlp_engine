@@ -39,6 +39,7 @@ struct AddonResponse {
     bool success = false;                           ///< Status of the operation.
     std::string error_message;                      ///< Diagnostic info if success is false.
     std::unordered_map<std::string, double> metrics; ///< Performance or logic metrics.
+    std::unordered_map<std::string, std::string> metadata; ///< Key-value pairs for structured response data.
 };
 
 /**

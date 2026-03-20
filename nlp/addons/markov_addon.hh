@@ -160,9 +160,6 @@ public:
             std::advance(it, std::uniform_int_distribution<size_t>(0, std::max((size_t)0, chain_.size() - 1))(gen_));
             std::istringstream ss(it->first);
             while (ss >> w) window.push_back(w);
-        } else {
-            // Emit initial seed tokens to the stream only if user provided seed
-            for (const auto& word : window) callback(word + " ", false);
         }
 
         // Ensure we don't exceed the required history for the N-Gram key

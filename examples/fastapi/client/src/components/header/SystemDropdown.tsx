@@ -35,7 +35,7 @@ const SystemDropdown: React.FC<SystemDropdownProps> = ({ theme, setTheme, availa
             }}
           >
             {t.label}
-            {theme === t.name && <Icon name="check" size="xs" />}
+            {theme === t.name && <Icon name="plus" size="xs" />}
           </button>
         ))}
       </div>

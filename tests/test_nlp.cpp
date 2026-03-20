@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include "../nlp/addons/dedupe_addon.hh"
 
 using namespace pce::nlp;
 namespace fs = std::filesystem;
@@ -180,6 +181,96 @@ TEST(NLPEngineTests, ToxicityDetection) {
 
     auto clean = engine->detect_toxicity("Have a nice day friend", "en");
     CHECK_FALSE(clean.is_toxic);
+}
+
+TEST_GROUP(DedupeAddonTests) {
+    std::unique_ptr<DeduplicationAddon> dedupe;
+
+    void setup() {
+        dedupe = std::make_unique<DeduplicationAddon>();
+        dedupe->initialize();
+    }
+
+    void teardown() {
+        dedupe.reset();
+    }
+};
+
+TEST(DedupeAddonTests, BasicDetection) {
+    std::string text = "This is a test. This is a test.";
+    std::unordered_map<std::string, std::string> options = {
+        {"mode", "detect"},
+        {"skip_words", "this,is,a"}
+    };
+
+    auto resp = dedupe->process(text, options);
+
+    CHECK(resp.success);
+    // Verify structured metadata contains the duplicate hit
+    CHECK(resp.metadata.count("dup_0_text") > 0);
+    STRCMP_EQUAL("This is a test.", resp.metadata.at("dup_0_text").c_str());
+
+    // Ensure the output is the original text (preserving state) and NOT a JSON string
+    CHECK(resp.output.find("duplicates") == std::string::npos);
+
+    DOUBLES_EQUAL(1.0, resp.metrics.at("duplicates_found"), 0.01);
+}
+
+TEST(DedupeAddonTests, ModeRemove) {
+    std::string text = "Keep this. Duplicate. Duplicate.";
+    std::unordered_map<std::string, std::string> options = {
+        {"mode", "remove"},
+        {"skip_words", "keep,this"}
+    };
+
+    auto resp = dedupe->process(text, options);
+
+    // Should result in "Keep this. Duplicate."
+    STRCMP_EQUAL("Keep this. Duplicate.", resp.output.c_str());
+}
+
+TEST(DedupeAddonTests, QuotationAndPunctuationNormalization) {
+    // "Hello world" vs "Hello world!" vs "\"Hello world\""
+    std::string text = "Hello world. Hello world! \"Hello world\"";
+    std::unordered_map<std::string, std::string> options = {
+        {"mode", "detect"},
+        {"ignore_quotes", "true"},
+        {"ignore_punctuation", "true"},
+        {"skip_words", "the,a,is"}
+    };
+
+    auto resp = dedupe->process(text, options);
+
+    // With normalization, it should find 2 duplicates of the first segment
+    DOUBLES_EQUAL(2.0, resp.metrics.at("duplicates_found"), 0.01);
+}
+
+TEST(DedupeAddonTests, SkipWords) {
+    // These should be considered duplicates if skip words are ignored
+    std::string text = "The cat sat. A cat sat.";
+    std::unordered_map<std::string, std::string> options = {
+        {"mode", "detect"},
+        {"skip_words", "the,a"}
+    };
+
+    auto resp = dedupe->process(text, options);
+
+    // "cat sat" vs "cat sat"
+    DOUBLES_EQUAL(1.0, resp.metrics.at("duplicates_found"), 0.01);
+}
+
+TEST(DedupeAddonTests, MinLengthFiltering) {
+    std::string text = "To be. To be. This is long enough. This is long enough.";
+    std::unordered_map<std::string, std::string> options = {
+        {"mode", "detect"},
+        {"min_length", "10"}
+    };
+
+    auto resp = dedupe->process(text, options);
+
+    // "To be" (length 5) is less than 10, so it shouldn't count as a duplicate
+    // "This is long enough" should count.
+    DOUBLES_EQUAL(1.0, resp.metrics.at("duplicates_found"), 0.01);
 }
 
 int main(int ac, char** av) {

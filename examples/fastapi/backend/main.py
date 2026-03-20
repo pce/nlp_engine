@@ -19,11 +19,11 @@ if "PYTHONPATH" in os.environ:
         if p and p not in sys.path:
             sys.path.insert(0, p)
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # --- Native NLP Engine Integration ---
 try:
@@ -59,10 +59,17 @@ class ProcessingRequest(BaseModel):
     streaming: bool = False
     session_id: Optional[str] = None
 
+class AnalysisHighlight(BaseModel):
+    text: str
+    offset: int
+    length: int
+
 class ProcessingResponse(BaseModel):
-    result: str
+    output: str = ""
+    duplicates: Optional[list[AnalysisHighlight]] = None
     task_id: Optional[str] = None
     status: str = "completed"
+    metrics: Dict[str, Any] = {}
 
 def refresh_markov_models():
     data_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data"))
@@ -130,58 +137,130 @@ class TrainingRequest(BaseModel):
     text: Optional[str] = None
     ngram_size: int = 2
 
-@app.post("/detect-language")
+@app.post("/detect-language", response_model=ProcessingResponse)
 async def detect_language(request: ProcessingRequest):
     try:
         res = engine.process_text_sync(request.text, "language", request.options)
-        return json.loads(res)
+        data = json.loads(res)
+        return ProcessingResponse(output=data.get("language", ""), status="success", metrics=data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/spell-check")
+@app.post("/spell-check", response_model=ProcessingResponse)
 async def spell_check(request: ProcessingRequest):
     try:
         res = engine.process_text_sync(request.text, "spell_check", request.options)
-        return json.loads(res)
+        data = json.loads(res)
+        return ProcessingResponse(output=res, status="success", metrics=data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/sentiment")
+@app.post("/sentiment", response_model=ProcessingResponse)
 async def analyze_sentiment(request: ProcessingRequest):
     try:
         res = engine.process_sync(request.text, "sentiment", request.options, request.session_id or "")
-        return json.loads(res)
+        data = json.loads(res)
+        return ProcessingResponse(output=data.get("sentiment", ""), status="success", metrics=data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/generate")
-async def generate_text(request: ProcessingRequest):
-    internal_task_id = f"gen_{int(time.time() * 1000)}"
-    active_tasks_tracker[internal_task_id] = {"type": "MarkovGen", "start": time.time()}
+@app.post("/analyze", response_model=ProcessingResponse)
+async def analyze_text(request: ProcessingRequest):
+    """
+    Dedicated endpoint for text analysis (Deduplication, Detection).
+    """
+    internal_task_id = f"ana_{int(time.time() * 1000)}"
+    active_tasks_tracker[internal_task_id] = {"type": "Analysis", "start": time.time()}
     try:
-        # Map plugin to model name if provided
+        method = "deduplication"
+
+        # Ensure model context for normalization if provided
+        available = getattr(app.state, "available_models", [])
+        source_model = request.options.get("model") or (available[0] if available else "generic_novel")
+        engine.load_markov_model(f"data/models/{source_model}.json", "deduplication")
+
+        safe_options = {k: str(v) for k, v in request.options.items()}
+        # Force detect mode for analysis endpoint
+        safe_options["mode"] = "detect"
+
+        raw_res = engine.process_sync(request.text, method, safe_options, request.session_id or "")
+
+        data = raw_res
+        if isinstance(raw_res, str):
+            try:
+                data = json.loads(raw_res)
+            except json.JSONDecodeError:
+                data = {"output": raw_res, "metadata": {}, "metrics": {}}
+
+        metadata = data.get("metadata", {})
+        duplicates_list = []
+
+        # Reconstruct structured duplicates from metadata
+        idx = 0
+        while f"dup_{idx}_text" in metadata:
+            duplicates_list.append({
+                "text": metadata.get(f"dup_{idx}_text", ""),
+                "offset": int(metadata.get(f"dup_{idx}_offset", 0)),
+                "length": int(metadata.get(f"dup_{idx}_length", 0))
+            })
+            idx += 1
+
+        return ProcessingResponse(
+            output="", # Analysis returns empty output, data is in duplicates
+            duplicates=duplicates_list,
+            status="success",
+            metrics=data.get("metrics", {})
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        active_tasks_tracker.pop(internal_task_id, None)
+
+@app.post("/generate", response_model=ProcessingResponse)
+async def generate_text(request: ProcessingRequest):
+    """
+    Primary endpoint for text generation (Markov, Fractal).
+    Separated from deduplication for a cleaner API contract.
+    """
+    internal_task_id = f"gen_{int(time.time() * 1000)}"
+    active_tasks_tracker[internal_task_id] = {"type": "Generation", "start": time.time()}
+    try:
+        # 1. Determine the target generator
         method = request.plugin if (request.plugin and request.plugin != "default") else "markov_generator"
 
-        # If calling fractal_generator, ensure the source model is linked
+        # 2. Setup Fractal dependencies if needed
         if method == "fractal_generator":
-            # Default to generic_novel if no model specified
             source_model = request.options.get("model") or "generic_novel"
             addons = engine.get_all_addons()
             if "fractal_generator" in addons:
                 fractal = addons["fractal_generator"]
-                # This call internally links the source model to the fractal engine
                 engine.register_fractal_addon(fractal, source_model)
                 logger.info(f"Linked Fractal engine to source model: {source_model}")
 
-        if method == "markov_generator" and request.options.get("model"):
+        # 3. Handle model selection overrides
+        if (method == "markov_generator" or method == "default") and request.options.get("model"):
             method = request.options["model"]
 
+        # 4. Process Synchronously
         safe_options = {k: str(v) for k, v in request.options.items()}
-        res = engine.process_sync(request.text, method, safe_options, request.session_id or "")
-        try:
-            return json.loads(res)
-        except json.JSONDecodeError:
-            return {"output": res, "status": "success"}
+        raw_res = engine.process_sync(request.text, method, safe_options, request.session_id or "")
+
+        # 5. Parse Engine Response
+        data = raw_res
+        if isinstance(raw_res, str):
+            try:
+                data = json.loads(raw_res)
+            except json.JSONDecodeError:
+                data = {"output": raw_res, "metadata": {}, "metrics": {}}
+
+        # 6. Build Generation-Specific Response
+        # We explicitly DO NOT check for duplicates here to keep the API focused
+        return ProcessingResponse(
+            output=data.get("output", ""),
+            duplicates=None,
+            status="success",
+            metrics=data.get("metrics", {})
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -272,7 +351,7 @@ async def train_model(request: TrainingRequest):
         active_tasks_tracker.pop(internal_task_id, None)
         logger.info(f"Task complete: {internal_task_id}")
 
-@app.post("/semantic")
+@app.post("/semantic", response_model=ProcessingResponse)
 async def semantic_analysis(request: ProcessingRequest):
     internal_task_id = f"vec_{int(time.time() * 1000)}"
     active_tasks_tracker[internal_task_id] = {"type": "VectorEngine", "start": time.time()}
@@ -281,9 +360,10 @@ async def semantic_analysis(request: ProcessingRequest):
         safe_options = {k: str(v) for k, v in request.options.items()}
         res = engine.process_sync(request.text, method, safe_options, request.session_id or "")
         try:
-            return json.loads(res)
+            data = json.loads(res)
+            return ProcessingResponse(output=res, status="success", metrics=data if isinstance(data, dict) else {})
         except json.JSONDecodeError:
-            return {"output": res, "status": "success"}
+            return ProcessingResponse(output=res, status="success")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

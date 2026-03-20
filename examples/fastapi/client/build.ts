@@ -42,7 +42,7 @@ const parseValue = (value: string): any => {
   if (/^\d+$/.test(value)) return parseInt(value, 10);
   if (/^\d*\.\d+$/.test(value)) return parseFloat(value);
 
-  if (value.includes(",")) return value.split(",").map(v => v.trim());
+  if (value.includes(",")) return value.split(",").map((v) => v.trim());
 
   return value;
 };
@@ -82,19 +82,26 @@ function parseArgs(): Partial<Bun.BuildConfig> {
 
     if (key.includes(".")) {
       const parts = key.split(".");
-      if (parts.length > 2) {
-        console.warn(
-          `Warning: Deeply nested option "${key}" is not supported. Only single-level nesting (e.g., --minify.whitespace) is allowed.`,
-        );
-        continue;
+      if (parts[0] === "define") {
+        // Handle --define.key=value by putting it directly into config.define
+        if (!config.define || typeof config.define !== "object") {
+          config.define = {};
+        }
+        const defineKey = parts.slice(1).join(".");
+        (config.define as Record<string, string>)[defineKey] = value;
+      } else {
+        // Handle other nested options like --minify.whitespace
+        let current: any = config;
+        for (let j = 0; j < parts.length - 1; j++) {
+          const part = parts[j]!;
+          if (typeof current[part] !== "object" || current[part] === null || Array.isArray(current[part])) {
+            current[part] = {};
+          }
+          current = current[part];
+        }
+        const lastKey = parts[parts.length - 1]!;
+        current[lastKey] = parseValue(value);
       }
-      const parentKey = parts[0]!;
-      const childKey = parts[1]!;
-      const existing = config[parentKey];
-      if (typeof existing !== "object" || existing === null || Array.isArray(existing)) {
-        config[parentKey] = {};
-      }
-      (config[parentKey] as Record<string, unknown>)[childKey] = parseValue(value);
     } else {
       config[key] = parseValue(value);
     }
@@ -128,27 +135,27 @@ if (existsSync(outdir)) {
 
 const start = performance.now();
 
-const entrypoints = [...new Bun.Glob("**.html").scanSync("src")]
-  .map(a => path.resolve("src", a))
-  .filter(dir => !dir.includes("node_modules"));
+const entrypoints = [...new Bun.Glob("**.html").scanSync("src")].map((a) => path.resolve("src", a)).filter((dir) => !dir.includes("node_modules"));
 console.log(`📄 Found ${entrypoints.length} HTML ${entrypoints.length === 1 ? "file" : "files"} to process\n`);
+
+const isProd = cliConfig.minify === true || process.argv.includes("--minify");
 
 const result = await Bun.build({
   entrypoints,
   outdir,
   plugins: [plugin],
-  minify: true,
+  minify: isProd,
   target: "browser",
-  sourcemap: "linked",
+  sourcemap: isProd ? "none" : "linked",
   define: {
-    "process.env.NODE_ENV": JSON.stringify("production"),
+    "import.meta.env.NODE_ENV": JSON.stringify(isProd ? "production" : "development"),
   },
   ...cliConfig,
 });
 
 const end = performance.now();
 
-const outputTable = result.outputs.map(output => ({
+const outputTable = result.outputs.map((output) => ({
   File: path.relative(process.cwd(), output.path),
   Type: output.kind,
   Size: formatFileSize(output.size),

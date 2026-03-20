@@ -1,8 +1,86 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { nlpService, NLPRequest, StreamChunk } from "../services/nlp-service";
-import { DocumentModel, DocumentState } from "../models/document";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { nlpService, type NLPRequest, type StreamChunk } from "../services/nlp-service";
+import { DocumentModel, type DocumentState } from "../models/document";
 import Icon from "./Icon";
 import AnalysisDashboard from "./analysis/AnalysisDashboard";
+
+/**
+ * Extracted Highlighter component to ensure useMemo is called consistently
+ * and not inside a conditional branch of the parent.
+ */
+const EditorHighlighter = ({ content, highlights, searchQuery }: { content: string; highlights: any[]; searchQuery?: string }) => {
+  const renderedHighlights = useMemo(() => {
+    const allHighlights = [...(highlights || [])];
+
+    // Add Search Matches to the highlight list (Needle in Haystack)
+    if (searchQuery && searchQuery.length > 1 && content) {
+      const lowerContent = content.toLowerCase();
+      const lowerQuery = searchQuery.toLowerCase();
+      let pos = lowerContent.indexOf(lowerQuery);
+      while (pos !== -1) {
+        allHighlights.push({ offset: pos, length: searchQuery.length, type: "search" });
+        pos = lowerContent.indexOf(lowerQuery, pos + 1);
+      }
+    }
+
+    if (allHighlights.length === 0 || !content) return null;
+
+    const result = [];
+    let lastIndex = 0;
+    const sortedHighlights = allHighlights.filter((h) => h && typeof h.offset === "number" && typeof h.length === "number").sort((a, b) => a.offset - b.offset);
+
+    for (const highlight of sortedHighlights) {
+      const offset = Math.max(0, highlight.offset);
+      const length = Math.max(0, highlight.length);
+
+      if (offset >= content.length || offset < lastIndex) continue;
+
+      if (offset > lastIndex) {
+        result.push(content.substring(lastIndex, offset));
+      }
+
+      const end = Math.min(content.length, offset + length);
+      const isSearch = highlight.type === "search";
+
+      result.push(
+        <span
+          key={`hl-${offset}-${lastIndex}-${isSearch ? "s" : "d"}`}
+          className="rounded-sm transition-all duration-200"
+          style={{
+            backgroundColor: isSearch
+              ? "color-mix(in srgb, var(--theme-primary) 30%, transparent)"
+              : "color-mix(in srgb, var(--theme-danger, #f43f5e) 25%, transparent)",
+            borderBottom: isSearch ? "2px solid var(--theme-primary)" : "2px solid var(--theme-danger, #f43f5e)",
+            padding: "1px 0",
+            color: "transparent",
+          }}
+        >
+          {content.substring(offset, end)}
+        </span>,
+      );
+      lastIndex = end;
+    }
+    // Remaining text
+    if (lastIndex < content.length) {
+      result.push(content.substring(lastIndex));
+    }
+    return result;
+  }, [content, highlights]);
+
+  return (
+    <div
+      className="absolute inset-0 p-6 text-lg leading-relaxed font-serif pointer-events-none whitespace-pre-wrap break-words overflow-y-auto scrollbar-none z-0"
+      style={{
+        color: "transparent",
+        WebkitTextFillColor: "transparent",
+        backgroundColor: "transparent",
+        userSelect: "none",
+      }}
+    >
+      {renderedHighlights}
+    </div>
+  );
+};
 
 interface DocumentPanelProps {
   content: string;
@@ -24,13 +102,35 @@ const DocumentPanel = ({
   // Initialize document state using the model helper
   const [doc, setDoc] = useState<DocumentState>(() => DocumentModel.createInitialState("Analysis Workspace", content));
   const [selectedText, setSelectedText] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [isSearchVisible, setIsSearchVisible] = useState<boolean>(false);
 
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [results, setResults] = useState<string>("");
   const [internalOutputContent, setInternalOutputContent] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"editor" | "output" | "results">("editor");
+  const [activeTab, setActiveTab] = useState<"editor" | "output" | "analysis">("editor");
+  const [highlights, setHighlights] = useState<Array<{ offset: number; length: number }>>([]);
+  const [outputHighlights, setOutputHighlights] = useState<Array<{ offset: number; length: number }>>([]);
+  const [outputDuplicates, setOutputDuplicates] = useState<number>(0);
 
   const outputContent = externalOutputContent !== undefined ? externalOutputContent : internalOutputContent;
+
+  // Sync tab on content changes
+  useEffect(() => {
+    if (externalOutputContent) {
+      setActiveTab("output");
+    }
+  }, [externalOutputContent]);
+
+  useEffect(() => {
+    if (activeTab === "output") {
+      const target = document.getElementById("markov-output-area") as HTMLTextAreaElement;
+      const highlighter = target?.previousSibling as HTMLElement;
+      if (target && highlighter) {
+        highlighter.scrollTop = target.scrollTop;
+      }
+    }
+  }, [outputContent, activeTab, outputHighlights]);
   const setOutputContent = onOutputChange || setInternalOutputContent;
   const streamCleanupRef = useRef<(() => void) | null>(null);
 
@@ -60,7 +160,7 @@ const DocumentPanel = ({
 
     try {
       const request: NLPRequest = {
-        text: textToProcess,
+        text: textToProcess || " ",
         plugin: "default",
         streaming: true,
         options: {
@@ -135,9 +235,27 @@ const DocumentPanel = ({
   useEffect(() => {
     if (onAnalysisResultsRef) {
       onAnalysisResultsRef.current = (newResults: string) => {
-        setActiveTab("results");
+        setActiveTab("analysis");
         setResults(newResults);
         setIsProcessing(false);
+
+        // Check for duplicates in results and set highlights
+        try {
+          const data = JSON.parse(newResults);
+          // Backend now guarantees an array for duplicates
+          const rawDuplicates = Array.isArray(data.duplicates) ? data.duplicates : [];
+          const validated = rawDuplicates.map((d: any) => {
+            const off = parseInt(String(d.offset), 10);
+            const len = parseInt(String(d.length), 10);
+            return {
+              offset: isNaN(off) ? 0 : off,
+              length: isNaN(len) ? 0 : len,
+            };
+          });
+          setHighlights(validated);
+        } catch (e) {
+          setHighlights([]);
+        }
       };
     }
     return () => {
@@ -180,10 +298,38 @@ const DocumentPanel = ({
       >
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg" style={{ backgroundColor: "var(--theme-bg)" }}>
-              <Icon name="document" size="sm" class="text-indigo-600 dark:text-indigo-400" style={{ color: "var(--theme-primary)" }} />
-            </div>
-            <div>
+            <button
+              onClick={() => setIsSearchVisible(!isSearchVisible)}
+              className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg hover:bg-indigo-200 transition-colors"
+              style={{ backgroundColor: "var(--theme-bg)" }}
+            >
+              <Icon name="search" size="sm" className="text-indigo-600 dark:text-indigo-400" style={{ color: "var(--theme-primary)" }} />
+            </button>
+            <div className="relative">
+              {isSearchVisible && (
+                <div
+                  className="absolute left-0 -top-1 border rounded-lg shadow-xl px-2 py-1 flex items-center gap-2 z-50 animate-in fade-in slide-in-from-left-2 w-48"
+                  style={{ backgroundColor: "var(--theme-surface)", borderColor: "var(--theme-primary)" }}
+                >
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="bg-transparent border-none text-[10px] font-bold  tracking-widest focus:ring-0 p-0 w-full"
+                    style={{ color: "var(--theme-text)" }}
+                  />
+                  <button
+                    onClick={() => {
+                      setIsSearchVisible(false);
+                      setSearchQuery("");
+                    }}
+                  >
+                    <Icon name="close" size="xs" className="text-slate-400 hover:text-rose-500" />
+                  </button>
+                </div>
+              )}
               <h2 className="text-sm font-black uppercase tracking-widest text-slate-800 dark:text-slate-200" style={{ color: "var(--theme-text)" }}>
                 {doc.title}
               </h2>
@@ -198,14 +344,14 @@ const DocumentPanel = ({
               className="p-2 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-all border border-transparent hover:border-slate-200 dark:hover:border-slate-600"
               title="Load saved work"
             >
-              <Icon name="import" size="sm" class="text-slate-500" />
+              <Icon name="import" size="sm" className="text-slate-500" />
             </button>
             <button
               onClick={handleSave}
               className="p-2 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-all border border-transparent hover:border-slate-200 dark:hover:border-slate-600"
               title="Save locally"
             >
-              <Icon name="copy" size="sm" class="text-slate-500" />
+              <Icon name="copy" size="sm" className="text-slate-500" />
             </button>
           </div>
         </div>
@@ -233,10 +379,10 @@ const DocumentPanel = ({
           </button>
           <button
             className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
-              activeTab === "results" ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              activeTab === "analysis" ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm" : "text-slate-500 hover:text-slate-700"
             }`}
-            style={activeTab === "results" ? { backgroundColor: "var(--theme-surface)", color: "var(--theme-primary)" } : { color: "var(--theme-text-muted)" }}
-            onClick={() => setActiveTab("results")}
+            style={activeTab === "analysis" ? { backgroundColor: "var(--theme-surface)", color: "var(--theme-primary)" } : { color: "var(--theme-text-muted)" }}
+            onClick={() => setActiveTab("analysis")}
           >
             Analysis View
           </button>
@@ -245,15 +391,22 @@ const DocumentPanel = ({
         <div className="p-4">
           {activeTab === "editor" && (
             <div className="animate-in fade-in duration-300 relative">
-              <textarea
-                value={doc.content}
-                onChange={(e) => handleContentChange(e.target.value)}
-                onSelect={handleSelection}
-                className="w-full h-80 p-6 bg-transparent border-none text-lg leading-relaxed focus:outline-none focus:ring-0 resize-none font-serif placeholder:text-slate-300 dark:placeholder:text-slate-700 overflow-y-auto scrollbar-thin"
-                style={{ color: "var(--theme-text)" }}
-                placeholder="Start typing your document for C++ linguistic processing..."
-                spellCheck="false"
-              />
+              <div className="relative w-full h-80">
+                {/* Highlight Layer - Optimized rendering with pre-calculated ranges */}
+                <EditorHighlighter content={doc.content} highlights={highlights} />
+                <textarea
+                  value={doc.content}
+                  onChange={(e) => {
+                    handleContentChange(e.target.value);
+                    if (highlights.length > 0) setHighlights([]);
+                  }}
+                  onSelect={handleSelection}
+                  className="w-full h-full p-6 bg-transparent border-none text-lg leading-relaxed focus:outline-none focus:ring-0 resize-none font-serif placeholder:text-slate-300 dark:placeholder:text-slate-700 overflow-y-auto scrollbar-thin relative z-10"
+                  style={{ color: "var(--theme-text)" }}
+                  placeholder="Start typing your document for C++ linguistic processing..."
+                  spellCheck="false"
+                />
+              </div>
               <div
                 className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center"
                 style={{ borderTopColor: "var(--theme-border)" }}
@@ -262,8 +415,23 @@ const DocumentPanel = ({
                   className="flex items-center gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-tighter"
                   style={{ color: "var(--theme-text-muted)" }}
                 >
-                  <span>{stats.wordCount} Words</span>
-                  <span>{stats.charCount} Chars</span>
+                  <div className="flex gap-4 items-center">
+                    <span>{stats.wordCount} WORDS</span>
+                    <span>{stats.charCount} CHARS</span>
+                    {selectedText && (
+                      <span className="lowercase opacity-80 italic" style={{ color: "var(--theme-primary)" }}>
+                        ({selectedText.trim().split(/\s+/).filter(Boolean).length} selected)
+                      </span>
+                    )}
+                  </div>
+                  {highlights.length > 0 ? (
+                    <span className="flex items-center gap-1 animate-pulse" style={{ color: "var(--theme-danger)" }}>
+                      <Icon name="search" size="xs" />
+                      {highlights.length} DUPLICATES FOUND
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--theme-text-muted)", opacity: 0.5 }}>0 DUPLICATES</span>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -297,19 +465,102 @@ const DocumentPanel = ({
                   Streaming from C++
                 </div>
               )}
-              <textarea
-                readOnly
-                value={outputContent}
-                className="w-full h-80 p-6 bg-slate-50/30 dark:bg-slate-900/30 border-none text-lg leading-relaxed focus:outline-none focus:ring-0 resize-none font-serif placeholder:text-slate-300 dark:placeholder:text-slate-700 overflow-y-auto scrollbar-thin rounded-xl shadow-inner"
-                style={{ color: "var(--theme-text)", backgroundColor: "var(--theme-bg)", opacity: 0.9 }}
-                placeholder="Markov generation output will appear here..."
-              />
+              <div className="relative group overflow-hidden rounded-xl border border-transparent focus-within:border-indigo-500/30 transition-colors bg-slate-50/30 dark:bg-slate-900/30 shadow-inner h-80">
+                <EditorHighlighter content={outputContent || ""} highlights={outputHighlights} searchQuery={searchQuery} />
+                <textarea
+                  readOnly
+                  id="markov-output-area"
+                  value={outputContent || ""}
+                  className="w-full h-full p-6 bg-transparent border-none text-lg leading-relaxed focus:outline-none focus:ring-0 resize-none font-serif placeholder:text-slate-300 dark:placeholder:text-slate-700 overflow-y-auto scrollbar-thin relative z-10"
+                  style={{
+                    color: "var(--theme-text)",
+                    opacity: 1,
+                  }}
+                  onScroll={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    const highlighter = target.previousSibling as HTMLElement;
+                    if (highlighter) {
+                      highlighter.scrollTop = target.scrollTop;
+                    }
+                  }}
+                  placeholder="Markov generation output will appear here..."
+                />
+              </div>
               <div
                 className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center"
                 style={{ borderTopColor: "var(--theme-border)" }}
               >
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest" style={{ color: "var(--theme-text-muted)" }}>
-                  {outputContent.split(/\s+/).filter(Boolean).length} Generated Words
+                <div
+                  className="flex items-center gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest"
+                  style={{ color: "var(--theme-text-muted)" }}
+                >
+                  <span>{(outputContent || "").split(/\s+/).filter(Boolean).length} GEN. WORDS</span>
+                  <button
+                    onClick={async () => {
+                      const text = outputContent || "";
+                      if (!text.trim()) return;
+
+                      // Clear and start
+                      setOutputHighlights([]);
+                      setOutputDuplicates(0);
+                      setIsProcessing(true);
+
+                      try {
+                        const res = await nlpService.analyze({
+                          seed: text,
+                          model: "deduplication",
+                          options: {
+                            mode: "detect",
+                            min_length: "1",
+                            skip_words: "",
+                            ignore_quotes: "true",
+                            ignore_punctuation: "true",
+                          },
+                        });
+
+                        // Use the standardized ProcessingResponse contract
+                        const data = res;
+                        const hits = Array.isArray(data.duplicates) ? data.duplicates : [];
+
+                        // Reactive state update - trigger re-render for counter
+                        // Strict numeric conversion for counter and highlights
+                        const safeHits = Array.isArray(hits) ? hits : [];
+                        setOutputDuplicates(safeHits.length);
+
+                        setOutputHighlights(
+                          safeHits.map((h: any) => {
+                            const off = parseInt(String(h.offset), 10);
+                            const len = parseInt(String(h.length), 10);
+                            return {
+                              offset: isNaN(off) ? 0 : off,
+                              length: isNaN(len) ? 0 : len,
+                            };
+                          }),
+                        );
+
+                        if (onAnalysisResultsRef?.current) {
+                          onAnalysisResultsRef.current(JSON.stringify(data, null, 2));
+                        }
+
+                        // Switch tab to show results if we found hits and weren't already there
+                        if (hits.length > 0 && activeTab !== "analysis") {
+                          setActiveTab("analysis");
+                        }
+                      } catch (e) {
+                        console.error("[Dedupe] Error:", e);
+                      } finally {
+                        setIsProcessing(false);
+                      }
+                    }}
+                    className="flex items-center gap-1 transition-all active:scale-95 group/dupbtn"
+                    style={{
+                      color: outputDuplicates > 0 ? "var(--theme-danger)" : "var(--theme-text-muted)",
+                      fontWeight: outputDuplicates > 0 ? "900" : "bold",
+                    }}
+                  >
+                    <Icon name="search" size="xs" />
+                    <span>{outputDuplicates} DUPS</span>
+                  </button>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -329,7 +580,7 @@ const DocumentPanel = ({
             </div>
           )}
 
-          {activeTab === "results" && (
+          {activeTab === "analysis" && (
             <div className="animate-in slide-in-from-bottom-2 duration-300 space-y-4">
               <div className="flex justify-between items-center px-2">
                 <div className="flex items-center gap-2">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { nlpService, StreamChunk, HealthStatus } from "../services/nlp-service";
+import { nlpService, type StreamChunk, type HealthStatus } from "../services/nlp-service";
 import Icon from "./Icon";
 
 interface SidebarProps {
@@ -19,7 +19,7 @@ interface AnalysisResults {
  * Sidebar Component for NLP Studio.
  * Focuses on real-time C++ engine output and structured dashboard results.
  */
-const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
+const Sidebar: React.FC<SidebarProps> = ({ documentContent = "" }) => {
   const [activeTab, setActiveTab] = useState<"analysis" | "settings">("analysis");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamLog, setStreamLog] = useState("");
@@ -60,17 +60,17 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
     // 1. Language Detection
     if (line.includes("Language:")) {
       const match = line.match(/Language: (\w+) • confidence: (\d+)%/);
-      if (match) setResults((prev) => ({ ...prev, language: { code: match[1], confidence: parseInt(match[2]) } }));
+      if (match) setResults((prev) => ({ ...prev, language: { code: match[1] || "unknown", confidence: parseInt(match[2] || "0") } }));
     }
     // 2. Sentiment
     else if (line.includes("Sentiment:")) {
       const match = line.match(/Sentiment: (\w+) • score: ([\d.-]+)/);
-      if (match) setResults((prev) => ({ ...prev, sentiment: { label: match[1], score: parseFloat(match[2]) } }));
+      if (match) setResults((prev) => ({ ...prev, sentiment: { label: match[1] || "neutral", score: parseFloat(match[2] || "0") } }));
     }
     // 3. Complexity/Readability
     else if (line.includes("Complexity:")) {
       const match = line.match(/Complexity: (\w+) • Grade: ([\d.N/A]+)/);
-      if (match) setResults((prev) => ({ ...prev, readability: { complexity: match[1], grade: match[2] } }));
+      if (match) setResults((prev) => ({ ...prev, readability: { complexity: match[1] || "unknown", grade: match[2] || "unknown" } }));
     }
     // 4. Terminology
     else if (line.includes("Keywords:") || line.includes("Terminology:")) {
@@ -114,20 +114,22 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
     try {
       const cleanup = await nlpService.streamNLP(
         {
-          text: documentContent,
+          text: documentContent || "The",
           plugin: "default",
-          streaming: true,
           options: {
             terminology: config.terminology ? "true" : "false",
             pos_tagging: config.posTagging ? "true" : "false",
+            safety: config.safety ? "true" : "false",
           },
         },
         (data: StreamChunk) => {
-          setStreamLog((prev) => prev + data.chunk);
+          if (data.chunk) {
+            setStreamLog((prev) => prev + data.chunk);
+            parseLogLine(data.chunk);
+          }
           if (data.error) {
             setStreamLog((prev) => prev + `\n[Stream Error: ${data.error}]`);
           }
-          parseLogLine(data.chunk);
           if (data.is_final) setIsStreaming(false);
         },
         (err) => {
@@ -138,6 +140,8 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
       );
       streamCleanupRef.current = cleanup;
     } catch (err) {
+      console.error("Analysis initiation failed:", err);
+      setStreamLog((prev) => prev + "\n[Error: Failed to start analysis]");
       setIsStreaming(false);
     }
   };
@@ -166,7 +170,7 @@ const Sidebar: React.FC<SidebarProps> = ({ documentContent }) => {
             }`}
             style={
               activeTab === tab.id
-                ? { backgroundColor: "var(--theme-bg)", color: "var(--theme-primary)", ringColor: "var(--theme-border)" }
+                ? { backgroundColor: "var(--theme-bg)", color: "var(--theme-primary)", borderColor: "var(--theme-border)" }
                 : { color: "var(--theme-text-muted)" }
             }
             onClick={() => setActiveTab(tab.id as any)}

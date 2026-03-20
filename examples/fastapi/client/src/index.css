@@ -8,8 +8,12 @@
         --theme-text: theme("colors.slate.900");
         --theme-text-muted: theme("colors.slate.500");
         --theme-primary: theme("colors.indigo.600");
+        --theme-danger: theme("colors.rose.600");
+        --theme-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --theme-font-serif: Georgia, Cambria, "Times New Roman", Times, serif;
 
-        @apply font-sans antialiased;
+        font-family: var(--theme-font-sans);
+        @apply antialiased;
         background-color: var(--theme-bg);
         color: var(--theme-text);
     }
@@ -21,6 +25,7 @@
         --theme-text: theme("colors.slate.100");
         --theme-text-muted: theme("colors.slate.400");
         --theme-primary: theme("colors.indigo.500");
+        --theme-danger: theme("colors.rose.500");
     }
 
     /* Solarized Dark */
@@ -31,6 +36,7 @@
         --theme-text: #839496;
         --theme-text-muted: #657b83;
         --theme-primary: #268bd2;
+        --theme-danger: #dc322f;
     }
 
     /* Monokai */
@@ -41,6 +47,7 @@
         --theme-text: #f8f8f2;
         --theme-text-muted: #75715e;
         --theme-primary: #ae81ff;
+        --theme-danger: #f92672;
     }
 
     /* Material Palenight */
@@ -51,12 +58,18 @@
         --theme-text: #bfc7d5;
         --theme-text-muted: #676e95;
         --theme-primary: #82aaff;
+        --theme-danger: #ff5370;
     }
 
     body {
         @apply min-h-screen m-0 overflow-hidden;
+        font-family: var(--theme-font-sans);
         background-color: var(--theme-bg);
         color: var(--theme-text);
+    }
+
+    .font-serif {
+        font-family: var(--theme-font-serif) !important;
     }
 
     /* Custom scrollbar for a more professional feel */

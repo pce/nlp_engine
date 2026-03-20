@@ -2,6 +2,7 @@ import React from "react";
 import Icon from "../Icon";
 import Dropdown from "../ui/Dropdown";
 import Tooltip from "../ui/Tooltip";
+import Toggle from "../ui/Toggle";
 
 interface MarkovDropdownProps {
   isGenerating: boolean;
@@ -43,7 +44,7 @@ const MarkovDropdown: React.FC<MarkovDropdownProps> = ({
   onAction,
 }) => {
   return (
-    <Dropdown label="Markov Engine" subLabel={isGenerating ? "Processing..." : selectedModel.replace(/_/g, " ")} icon={isGenerating ? "refresh" : "sparkles"}>
+    <Dropdown label="Markov Engine" subLabel={isGenerating ? "Processing..." : selectedModel.replace(/_/g, " ")} icon={isGenerating ? "activity" : "sparkles"}>
       {/* Models Section */}
       <div className="px-4 pb-2 mb-2 border-b" style={{ borderBottomColor: "var(--theme-border)" }}>
         <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: "var(--theme-text-muted)" }}>
@@ -68,17 +69,8 @@ const MarkovDropdown: React.FC<MarkovDropdownProps> = ({
 
       {/* Markov Settings */}
       <div className="px-4 py-2 space-y-3 border-b overflow-y-auto max-h-[400px]" style={{ borderBottomColor: "var(--theme-border)" }}>
-        <div className="flex justify-between items-center">
-          <span className="text-[10px] font-bold" style={{ color: "var(--theme-text-muted)" }}>
-            Hybrid Mode
-          </span>
-          <button
-            onClick={() => setGenOptions((p) => ({ ...p, useHybrid: !p.useHybrid }))}
-            className="w-8 h-4 rounded-full relative transition-colors"
-            style={{ backgroundColor: genOptions.useHybrid ? "var(--theme-primary)" : "var(--theme-bg)" }}
-          >
-            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${genOptions.useHybrid ? "left-4" : "left-0.5"}`} />
-          </button>
+        <div className="py-1">
+          <Toggle label="Hybrid Mode" checked={genOptions.useHybrid} onChange={(val) => setGenOptions((p) => ({ ...p, useHybrid: val }))} />
         </div>
 
         <div className="space-y-1">
@@ -232,7 +224,7 @@ const MarkovDropdown: React.FC<MarkovDropdownProps> = ({
             className="w-full text-left px-3 py-2 rounded-lg text-[10px] font-bold flex items-center gap-2 hover:opacity-80 transition-opacity"
             style={{ color: "var(--theme-warning)" }}
           >
-            <Icon name="refresh" size="sm" /> Gen. Fractal
+            <Icon name="tree" size="sm" /> Gen. Fractal
           </button>
         </Tooltip>
       </div>

@@ -33,6 +33,7 @@ BUILD_PYTHON=0
 RUN_TESTS=0
 BUILD_CLIENT=0
 RUN_FASTAPI=0
+PROD_MODE=0
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 for arg in "$@"; do
@@ -40,6 +41,7 @@ for arg in "$@"; do
     clean)        CLEAN=1 ;;
     --python)     BUILD_PYTHON=1 ;;
     --fastapi)    BUILD_PYTHON=1; BUILD_CLIENT=1; RUN_FASTAPI=1; RUN_TESTS=1 ;;
+    --prod)       PROD_MODE=1 ;;
     --test)       RUN_TESTS=1 ;;
     --client)     BUILD_CLIENT=1 ;;
     --release)    BUILD_TYPE="Release" ;;
@@ -71,8 +73,15 @@ if [[ "$BUILD_CLIENT" -eq 1 ]]; then
   cd "$ROOT/examples/fastapi/client"
   info "Installing dependencies..."
   bun install
-  info "Building static app..."
-  bun run build.ts
+
+  if [[ "$PROD_MODE" -eq 1 ]]; then
+    info "Building static app (Production)..."
+    bun run build.ts --minify --sourcemap=none --define.import.meta.env.NODE_ENV=\"production\"
+  else
+    info "Building static app (Development)..."
+    bun run build.ts --no-minify --sourcemap=linked --define.import.meta.env.NODE_ENV=\"development\"
+  fi
+
   success "Client built in examples/fastapi/client/dist"
   cd "$ROOT"
 fi

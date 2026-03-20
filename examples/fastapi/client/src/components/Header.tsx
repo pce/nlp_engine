@@ -20,7 +20,7 @@ interface HeaderProps {
 
 /**
  * Header Component
- * Refactored to use modular sub-components for better maintainability.
+ * Refactored to use a scalable, plugin-agnostic routing system.
  */
 const Header: React.FC<HeaderProps> = ({
   sidebarOpen,
@@ -54,44 +54,60 @@ const Header: React.FC<HeaderProps> = ({
       if (models && models.length > 0) {
         setAvailableModels(models);
         if (models.includes("generic_novel")) setSelectedModel("generic_novel");
-        else setSelectedModel(models[0]);
+        else if (models[0]) setSelectedModel(models[0]);
       }
     });
   }, []);
 
   const handleAction = async (method: string, options: any = {}) => {
-    const textarea = document.querySelector("textarea");
-    if (!textarea) return;
+    const textareas = Array.from(document.querySelectorAll("textarea"));
+    const visibleTextarea = textareas.find((t) => t.offsetParent !== null) || textareas[0];
+
+    if (!visibleTextarea) return;
 
     setIsGenerating(true);
     try {
-      const response = await nlpService.generateMarkov({
-        seed: textarea.value,
-        model: method, // Note: backend uses this for fractal/dedupe if routed through generate
-        options: {
-          ...options,
-          depth: genOptions.fractalDepth,
-          probability: genOptions.fractalProb,
-        },
-        temperature: genOptions.temperature,
-        top_p: genOptions.top_p,
-        length: genOptions.length,
-      });
+      const isFractal = method === "fractal" || method === "fractal_generator";
+      const isDedupe = method === "dedupe" || method === "deduplication";
+      const pluginName = isFractal ? "fractal_generator" : isDedupe ? "deduplication" : method;
+      const currentText = visibleTextarea.value;
 
-      if (response.output) {
-        if (method === "deduplicator") {
-          // Deduplication modifies the main editor content
-          if (onContentChange) onContentChange(response.output, "editor");
-        } else if (method === "fractal_generator") {
-          // Fractal generation appends to the main editor content
-          if (onContentChange) onContentChange(textarea.value + "\n\n" + response.output, "output");
+      let response;
+      if (isDedupe) {
+        response = await nlpService.analyze({
+          seed: currentText,
+          model: "deduplication",
+          options: {
+            ...options,
+            mode: "detect",
+            min_length: options.min_length || "1",
+          },
+        });
+        onAnalysisResults?.(JSON.stringify(response, null, 2));
+      } else {
+        response = await nlpService.generateMarkov({
+          seed: currentText,
+          model: pluginName,
+          options: {
+            ...options,
+            depth: genOptions.fractalDepth.toString(),
+            probability: genOptions.fractalProb.toString(),
+            n_gram: genOptions.nGram.toString(),
+            length: genOptions.length.toString(),
+          },
+          temperature: genOptions.temperature,
+          top_p: genOptions.top_p,
+          length: genOptions.length,
+        });
+
+        if (isFractal) {
+          onContentChange?.(response.output, "output");
         } else {
-          // Standard analysis results (sentiment, lang, etc) land in Analysis View
-          if (onAnalysisResults) onAnalysisResults(response.output);
+          onContentChange?.(response.output, "editor");
         }
       }
     } catch (error) {
-      console.error(`${method} failed:`, error);
+      console.error(`[Header] ${method} failed:`, error);
     } finally {
       setIsGenerating(false);
     }
@@ -113,15 +129,11 @@ const Header: React.FC<HeaderProps> = ({
         const models = await nlpService.getAvailableModels();
         setAvailableModels(models);
         setSelectedModel(result.model);
-        if (onAnalysisResults) {
-          onAnalysisResults(`[Log] Model training complete: ${result.model}\nN-Gram size: ${result.ngram_size}`);
-        }
+        onAnalysisResults?.(`[Log] Model training complete: ${result.model}\nN-Gram size: ${result.ngram_size}`);
       }
     } catch (error) {
       console.error("Training failed:", error);
-      if (onAnalysisResults) {
-        onAnalysisResults(`[Error] Training failed: ${error}`);
-      }
+      onAnalysisResults?.(`[Error] Training failed: ${error}`);
     } finally {
       setIsGenerating(false);
     }
@@ -130,14 +142,17 @@ const Header: React.FC<HeaderProps> = ({
   const handleGenerate = async (withInput: boolean = false, useStream: boolean = true) => {
     setIsGenerating(true);
     try {
-      const textarea = document.querySelector("textarea");
-      const initialText = textarea?.value || "";
+      // Find the editor textarea specifically if it exists, otherwise fallback to visible
+      const textareas = Array.from(document.querySelectorAll("textarea"));
+      const editorTextarea = (document.querySelector("#editor-area") as HTMLTextAreaElement) || textareas.find((t) => t.offsetParent !== null) || textareas[0];
+      const initialText = editorTextarea?.value || "";
+
       const seed = withInput
-        ? textarea?.selectionStart !== textarea?.selectionEnd
-          ? initialText.substring(textarea!.selectionStart, textarea!.selectionEnd)
+        ? editorTextarea?.selectionStart !== editorTextarea?.selectionEnd
+          ? initialText.substring(editorTextarea!.selectionStart, editorTextarea!.selectionEnd)
           : initialText.slice(-100)
-        : "The";
-      const baseText = withInput ? initialText + (initialText.endsWith(" ") ? "" : " ") : "";
+        : "";
+      const baseText = "";
 
       const request = {
         seed: seed || "The",
@@ -156,7 +171,8 @@ const Header: React.FC<HeaderProps> = ({
           request,
           (chunk, is_final) => {
             accumulated += chunk;
-            if (onContentChange) onContentChange(baseText + accumulated, "output");
+            // Ensure we update the output textarea specifically
+            onContentChange?.(baseText + accumulated, "output");
             if (is_final) setIsGenerating(false);
           },
           (err) => {
@@ -166,7 +182,7 @@ const Header: React.FC<HeaderProps> = ({
         );
       } else {
         const res = await nlpService.generateMarkov(request);
-        if (onContentChange && res.output) onContentChange(baseText + res.output, "output");
+        if (res.output) onContentChange?.(baseText + res.output, "output");
         setIsGenerating(false);
       }
     } catch (error) {
@@ -205,13 +221,12 @@ const Header: React.FC<HeaderProps> = ({
             genOptions={genOptions}
             setGenOptions={setGenOptions}
             onGenerate={handleGenerate}
-            onAction={handleAction}
-            onTrain={handleTrain}
+            onAction={(method, options) => handleAction(method === "fractal" ? "fractal_generator" : method, options)}
           />
 
-          <ToolkitDropdown onAction={handleAction} />
+          <ToolkitDropdown onAction={(method, options) => handleAction(method === "dedupe" ? "deduplication" : method, options)} />
 
-          <SystemDropdown theme={theme} setTheme={setTheme} availableThemes={availableThemes} />
+          <SystemDropdown theme={theme} setTheme={(t: string) => setTheme(t as any)} availableThemes={availableThemes} />
 
           <div className="flex items-center gap-2 pl-2 border-l" style={{ borderLeftColor: "var(--theme-border)" }}>
             <StatsDashboard />

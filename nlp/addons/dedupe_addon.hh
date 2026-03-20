@@ -6,25 +6,22 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <unordered_map>
 #include <sstream>
 #include <algorithm>
 #include <iostream>
+#include <regex>
 
 namespace pce::nlp {
 
 /**
  * @class DeduplicationAddon
- * @brief Addon for detecting, removing, or Replacing duplicate text patterns.
- *
- * This addon can operate in three modes:
- * 1. "detect": Returns a JSON list of found duplicates.
- * 2. "remove": Strips duplicate sentences/phrases.
- * 3. "semantic_replace": Replaces duplicates with semantically similar alternatives
- *    using the VectorAddon.
+ * @brief Advanced deduplication for granular pattern detection.
+ * Supports detection and removal of repeated segments based on normalization rules.
  */
 class DeduplicationAddon : public INLPAddon {
 public:
-    DeduplicationAddon() : name_("deduplicator"), version_("1.0.0"), ready_(true) {}
+    DeduplicationAddon() : name_("deduplication"), version_("2.2.0"), ready_(true) {}
 
     const std::string& name() const override { return name_; }
     const std::string& version() const override { return version_; }
@@ -44,105 +41,167 @@ public:
     }
 
     /**
-     * @brief Process text to handle duplicates.
-     * @param options { "mode": "remove|detect|replace", "min_length": "10" }
+     * @brief Process text by segmenting it into phrases/sentences and identifying duplicates.
+     *
+     * Options:
+     * - mode: "detect" | "remove"
+     * - min_length: minimum character length of a segment to be considered for deduplication
+     * - skip_words: comma-separated list of words to ignore during normalization
+     * - ignore_quotes: boolean string ("true"/"false") to strip quotes during comparison
+     * - ignore_punctuation: boolean string ("true"/"false") to strip punctuation during comparison
      */
     AddonResponse process(const std::string& input,
                          const std::unordered_map<std::string, std::string>& options,
                          std::shared_ptr<AddonContext> context = nullptr) override {
 
-        std::string mode = options.count("mode") ? options.at("mode") : "remove";
-        size_t min_length = options.count("min_length") ? std::stoul(options.at("min_length")) : 5;
+        std::string mode = options.count("mode") ? options.at("mode") : "detect";
+        size_t min_len_threshold = options.count("min_length") ? std::stoul(options.at("min_length")) : 1;
+        bool ignore_quotes = options.count("ignore_quotes") && options.at("ignore_quotes") == "true";
+        bool ignore_punctuation = options.count("ignore_punctuation") && options.at("ignore_punctuation") == "true";
 
-        // Split into segments and track original offsets for highlighting
-        std::vector<std::pair<std::string, size_t>> segments_with_offsets;
-        size_t current_pos = 0;
-        std::stringstream ss_split(input);
-        std::string segment;
-        while (std::getline(ss_split, segment, '.')) {
-            if (!segment.empty()) {
-                size_t found_pos = input.find(segment, current_pos);
-                if (found_pos != std::string::npos) {
-                    segments_with_offsets.push_back({segment, found_pos});
-                    current_pos = found_pos + segment.length();
-                }
+        std::unordered_set<std::string> skip_set;
+        if (options.count("skip_words") && !options.at("skip_words").empty()) {
+            std::stringstream ss(options.at("skip_words"));
+            std::string w;
+            while (std::getline(ss, w, ',')) {
+                if (!w.empty()) skip_set.insert(normalize_word(w));
             }
         }
 
-        std::vector<std::string> unique_segments;
-        std::unordered_set<std::string> seen;
-        std::vector<std::pair<std::string, size_t>> duplicate_hits;
+        struct Segment {
+            std::string raw;        // Original text including trailing punctuation/space
+            std::string signature;  // Normalized version used for comparison
+            size_t offset;
+            size_t length;
+            bool is_duplicate = false;
+        };
 
-        for (const auto& [seg, offset] : segments_with_offsets) {
-            std::string cleaned = clean_string(seg);
-            if (cleaned.length() < min_length) {
-                unique_segments.push_back(seg);
-                continue;
+        std::vector<Segment> segments;
+        // Regex to split by sentence-ending punctuation while keeping the punctuation
+        std::regex segment_regex(R"([^.!?\s][^.!?]*[.!?]*)");
+        auto seg_begin = std::sregex_iterator(input.begin(), input.end(), segment_regex);
+        auto seg_end = std::sregex_iterator();
+
+        size_t last_pos = 0;
+        for (std::sregex_iterator i = seg_begin; i != seg_end; ++i) {
+            std::smatch match = *i;
+            std::string raw = match.str();
+
+            // Check for leading whitespace that might have been skipped by the regex
+            if (match.position() > last_pos) {
+                // If we are in remove mode, we might want to preserve the leading space
+                // but for segmentation we usually attach it to the next segment or keep it.
             }
 
-            if (seen.find(cleaned) == seen.end()) {
-                seen.insert(cleaned);
-                unique_segments.push_back(seg);
+            std::string sig = create_signature(raw, skip_set, ignore_quotes, ignore_punctuation);
+
+            segments.push_back({raw, sig, static_cast<size_t>(match.position()), raw.length(), false});
+            last_pos = match.position() + raw.length();
+        }
+
+        std::unordered_set<std::string> seen_signatures;
+        int dup_count = 0;
+
+        for (auto& seg : segments) {
+            if (seg.signature.empty()) continue;
+
+            // Apply min_length check on the signature or the raw text?
+            // Unit tests suggest min_length applies to the segment being compared.
+            if (seg.signature.length() < min_len_threshold) continue;
+
+            if (seen_signatures.count(seg.signature)) {
+                seg.is_duplicate = true;
+                dup_count++;
             } else {
-                duplicate_hits.push_back({seg, offset});
-                if (mode == "semantic_replace") {
-                    unique_segments.push_back("[Variation]");
-                }
-                // If mode is "remove", we skip
+                seen_signatures.insert(seg.signature);
             }
         }
 
         AddonResponse resp;
         resp.success = true;
 
-        if (mode == "detect") {
-            std::stringstream ss;
-            ss << "{\"duplicates\": [";
-            for (size_t i = 0; i < duplicate_hits.size(); ++i) {
-                ss << "{\"text\": \"" << duplicate_hits[i].first
-                   << "\", \"offset\": " << duplicate_hits[i].second
-                   << ", \"length\": " << duplicate_hits[i].first.length() << "}";
-                if (i < duplicate_hits.size() - 1) ss << ", ";
+        if (mode == "remove") {
+            std::string result;
+            bool first = true;
+            for (const auto& seg : segments) {
+                if (!seg.is_duplicate) {
+                    if (!first && !result.empty() && result.back() != ' ' && seg.raw.front() != ' ') {
+                        result += " ";
+                    }
+                    result += seg.raw;
+                    first = false;
+                }
             }
-            ss << "]}";
-            resp.output = ss.str();
+            // Trim trailing space if added
+            if (!result.empty() && result.back() == ' ') result.pop_back();
+            resp.output = result;
         } else {
-            std::stringstream ss;
-            for (size_t i = 0; i < unique_segments.size(); ++i) {
-                ss << unique_segments[i] << (i == unique_segments.size() - 1 ? "" : ". ");
-            }
-            resp.output = ss.str();
+            resp.output = input;
         }
 
-        resp.metrics["duplicates_found"] = static_cast<double>(duplicate_hits.size());
+        // Export duplicates as structured metadata
+        int meta_idx = 0;
+        for (const auto& seg : segments) {
+            if (seg.is_duplicate) {
+                std::string idx_str = std::to_string(meta_idx++);
+                resp.metadata["dup_" + idx_str + "_text"] = seg.raw;
+                resp.metadata["dup_" + idx_str + "_offset"] = std::to_string(seg.offset);
+                resp.metadata["dup_" + idx_str + "_length"] = std::to_string(seg.length);
+            }
+        }
+
+        resp.metrics["duplicates_found"] = static_cast<double>(dup_count);
+        resp.metrics["has_duplicates"] = dup_count > 0 ? 1.0 : 0.0;
+
         return resp;
     }
 
     bool is_ready() const override { return ready_; }
 
 private:
-    std::vector<std::string> split_sentences(const std::string& text) {
-        std::vector<std::string> res;
-        std::stringstream ss(text);
-        std::string segment;
-        while (std::getline(ss, segment, '.')) {
-            if (!segment.empty()) {
-                // Trim leading whitespace
-                size_t first = segment.find_first_not_of(' ');
-                if (std::string::npos != first) {
-                    segment = segment.substr(first);
-                }
-                res.push_back(segment);
+    std::string normalize_word(const std::string& s) {
+        std::string res;
+        for (unsigned char c : s) {
+            if (!std::ispunct(c) && !std::isspace(c)) {
+                res += static_cast<char>(std::tolower(c));
             }
         }
         return res;
     }
 
-    std::string clean_string(const std::string& s) {
-        std::string res = s;
-        res.erase(std::remove_if(res.begin(), res.end(), ::isspace), res.end());
-        std::transform(res.begin(), res.end(), res.begin(), ::tolower);
-        return res;
+    std::string create_signature(const std::string& s,
+                                const std::unordered_set<std::string>& skip_set,
+                                bool ignore_quotes,
+                                bool ignore_punctuation) {
+        std::stringstream ss;
+        std::string word;
+        std::string input_copy = s;
+
+        // Simple tokenizer for signature creation
+        std::regex word_regex(R"(\S+)");
+        auto words_begin = std::sregex_iterator(input_copy.begin(), input_copy.end(), word_regex);
+        auto words_end = std::sregex_iterator();
+
+        bool first = true;
+        for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
+            std::string w = i->str();
+
+            if (ignore_quotes) {
+                w.erase(std::remove(w.begin(), w.end(), '\"'), w.end());
+                w.erase(std::remove(w.begin(), w.end(), '\''), w.end());
+            }
+            if (ignore_punctuation) {
+                w.erase(std::remove_if(w.begin(), w.end(), ::ispunct), w.end());
+            }
+
+            std::string norm = normalize_word(w);
+            if (norm.empty() || skip_set.count(norm)) continue;
+
+            if (!first) ss << " ";
+            ss << norm;
+            first = false;
+        }
+        return ss.str();
     }
 
     std::shared_ptr<VectorAddon> vector_engine_;
@@ -153,4 +212,4 @@ private:
 
 } // namespace pce::nlp
 
-#endif // DEDUPE_ADDON_HH
+#endif

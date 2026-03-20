@@ -219,6 +219,7 @@ PYBIND11_MODULE(nlp_engine, m) {
             py::dict d;
             d["output"] = resp.output;
             d["success"] = resp.success;
+            d["metadata"] = resp.metadata;
             return d;
         }, py::arg("input"),
            py::arg("options") = std::unordered_map<std::string, std::string>(),
@@ -236,6 +237,8 @@ PYBIND11_MODULE(nlp_engine, m) {
             py::dict d;
             d["output"] = resp.output;
             d["success"] = resp.success;
+            d["metadata"] = resp.metadata;
+            d["metrics"] = resp.metrics;
             return d;
         }, py::arg("input"),
            py::arg("options") = std::unordered_map<std::string, std::string>(),
