@@ -22,7 +22,10 @@ interface AnalysisDashboardProps {
  * A scientific, "dashboardy" panel for visualizing NLP engine results.
  * Parses raw JSON/text output from the C++ engine into visual components.
  */
-const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProcessing }) => {
+const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
+  results,
+  isProcessing,
+}) => {
   // Parse results safely. The engine might return raw text or a JSON string.
   const data = useMemo(() => {
     if (!results) return null;
@@ -40,7 +43,9 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
         <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center opacity-50">
           <Icon name="analytics" size="lg" />
         </div>
-        <p className="text-[10px] font-black uppercase tracking-[0.3em]">Awaiting Engine Analysis</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.3em]">
+          Awaiting Engine Analysis
+        </p>
       </div>
     );
   }
@@ -54,7 +59,9 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
           Raw Stream Data
         </div>
         {results}
-        {isProcessing && <span className="inline-block w-2 h-4 ml-1 bg-emerald-500 animate-pulse" />}
+        {isProcessing && (
+          <span className="inline-block w-2 h-4 ml-1 bg-emerald-500 animate-pulse" />
+        )}
       </div>
     );
   }
@@ -68,11 +75,30 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
           value={data?.sentiment_score?.toFixed(2) || "0.00"}
           icon="sentiment"
           color="text-blue-500"
-          trend={data?.sentiment_score && data.sentiment_score > 0 ? "positive" : "negative"}
+          trend={
+            data?.sentiment_score && data.sentiment_score > 0
+              ? "positive"
+              : "negative"
+          }
         />
-        <StatCard label="Readability" value={data?.readability_score?.toFixed(1) || "0.0"} icon="readability" color="text-amber-500" />
-        <StatCard label="Tokens" value={data?.tokens?.toString() || "0"} icon="brain" color="text-indigo-500" />
-        <StatCard label="Sentences" value={data?.sentences?.toString() || "0"} icon="rows" color="text-emerald-500" />
+        <StatCard
+          label="Readability"
+          value={data?.readability_score?.toFixed(1) || "0.0"}
+          icon="readability"
+          color="text-amber-500"
+        />
+        <StatCard
+          label="Tokens"
+          value={data?.tokens?.toString() || "0"}
+          icon="brain"
+          color="text-indigo-500"
+        />
+        <StatCard
+          label="Sentences"
+          value={data?.sentences?.toString() || "0"}
+          icon="rows"
+          color="text-emerald-500"
+        />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -90,19 +116,26 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
                 .map(([tag, count], idx) => (
                   <div key={tag} className="space-y-1 group">
                     <div className="flex justify-between text-[10px] font-bold uppercase tracking-tighter">
-                      <span className="text-slate-500 group-hover:text-indigo-600 transition-colors">{tag}</span>
+                      <span className="text-slate-500 group-hover:text-indigo-600 transition-colors">
+                        {tag}
+                      </span>
                       <span className="text-slate-400">{count}</span>
                     </div>
                     <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-indigo-500 rounded-full transition-all duration-1000 ease-out"
-                        style={{ width: `${Math.min(100, ((count as number) / (data.tokens || 1)) * 200)}%`, transitionDelay: `${idx * 100}ms` }}
+                        style={{
+                          width: `${Math.min(100, ((count as number) / (data.tokens || 1)) * 200)}%`,
+                          transitionDelay: `${idx * 100}ms`,
+                        }}
                       />
                     </div>
                   </div>
                 ))
             ) : (
-              <p className="text-xs text-slate-400 italic">No distribution data available</p>
+              <p className="text-xs text-slate-400 italic">
+                No distribution data available
+              </p>
             )}
           </div>
         </div>
@@ -111,7 +144,11 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
         {data?.duplicates && data.duplicates.length > 0 && (
           <div className="md:col-span-3 bg-white dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 shadow-2xl animate-in fade-in slide-in-from-bottom-8 duration-700 relative overflow-hidden group">
             <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-              <Icon name="search" size="lg" className="scale-[4] text-rose-500 rotate-12" />
+              <Icon
+                name="search"
+                size="lg"
+                className="scale-[4] text-rose-500 rotate-12"
+              />
             </div>
 
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10 relative z-10">
@@ -120,14 +157,22 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
                   <div className="p-2 bg-rose-500/10 rounded-xl">
                     <Icon name="search" size="sm" className="text-rose-500" />
                   </div>
-                  <h3 className="text-[11px] font-black uppercase tracking-[0.4em] text-rose-500">Redundancy Report</h3>
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.4em] text-rose-500">
+                    Redundancy Report
+                  </h3>
                 </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Pattern matching results from C++ Deduplication Addon</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                  Pattern matching results from C++ Deduplication Addon
+                </p>
               </div>
 
               <div className="flex items-baseline gap-2 bg-rose-500/5 px-4 py-2 rounded-2xl border border-rose-500/10">
-                <span className="text-3xl font-black text-rose-500 tracking-tighter tabular-nums">{data.duplicates.length}</span>
-                <span className="text-[9px] font-black uppercase tracking-widest text-rose-400/70">Duplicates</span>
+                <span className="text-3xl font-black text-rose-500 tracking-tighter tabular-nums">
+                  {data.duplicates.length}
+                </span>
+                <span className="text-[9px] font-black uppercase tracking-widest text-rose-400/70">
+                  Duplicates
+                </span>
               </div>
             </div>
 
@@ -148,13 +193,21 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="flex flex-col items-end">
-                        <span className="text-[7px] font-black uppercase tracking-tighter text-slate-300">Offset</span>
-                        <span className="text-[9px] font-mono font-bold text-slate-500">{String(dup.offset).padStart(4, "0")}</span>
+                        <span className="text-[7px] font-black uppercase tracking-tighter text-slate-300">
+                          Offset
+                        </span>
+                        <span className="text-[9px] font-mono font-bold text-slate-500">
+                          {String(dup.offset).padStart(4, "0")}
+                        </span>
                       </div>
                       <div className="w-px h-4 bg-slate-100 dark:bg-slate-800" />
                       <div className="flex flex-col items-end">
-                        <span className="text-[7px] font-black uppercase tracking-tighter text-slate-300">Size</span>
-                        <span className="text-[9px] font-mono font-bold text-slate-500">{dup.length}</span>
+                        <span className="text-[7px] font-black uppercase tracking-tighter text-slate-300">
+                          Size
+                        </span>
+                        <span className="text-[9px] font-mono font-bold text-slate-500">
+                          {dup.length}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -173,7 +226,9 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Deduplicator Mode: Detect
               </div>
-              <div className="text-[8px] font-black uppercase tracking-widest text-slate-300">Engine: PCE-NLP-v2.0</div>
+              <div className="text-[8px] font-black uppercase tracking-widest text-slate-300">
+                Engine: PCE-NLP-v2.0
+              </div>
             </div>
           </div>
         )}
@@ -195,7 +250,9 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ results, isProces
                 </span>
               ))
             ) : (
-              <p className="text-xs text-slate-400 italic">Extracting entities...</p>
+              <p className="text-xs text-slate-400 italic">
+                Extracting entities...
+              </p>
             )}
           </div>
         </div>
@@ -212,20 +269,34 @@ interface StatCardProps {
   trend?: "positive" | "negative";
 }
 
-const StatCard: React.FC<StatCardProps> = ({ label, value, icon, color, trend }) => (
+const StatCard: React.FC<StatCardProps> = ({
+  label,
+  value,
+  icon,
+  color,
+  trend,
+}) => (
   <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group">
     <div className="flex items-center justify-between mb-2">
-      <div className={`p-2 rounded-xl bg-slate-50 dark:bg-slate-800 group-hover:bg-indigo-50 dark:group-hover:bg-indigo-900/20 transition-colors ${color}`}>
+      <div
+        className={`p-2 rounded-xl bg-slate-50 dark:bg-slate-800 group-hover:bg-indigo-50 dark:group-hover:bg-indigo-900/20 transition-colors ${color}`}
+      >
         <Icon name={icon} size="sm" />
       </div>
       {trend && (
-        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${trend === "positive" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+        <span
+          className={`text-[8px] font-black px-1.5 py-0.5 rounded ${trend === "positive" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}
+        >
           {trend === "positive" ? "↑" : "↓"}
         </span>
       )}
     </div>
-    <div className="text-2xl font-black tracking-tight text-slate-800 dark:text-white leading-none">{value}</div>
-    <div className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">{label}</div>
+    <div className="text-2xl font-black tracking-tight text-slate-800 dark:text-white leading-none">
+      {value}
+    </div>
+    <div className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">
+      {label}
+    </div>
   </div>
 );
 

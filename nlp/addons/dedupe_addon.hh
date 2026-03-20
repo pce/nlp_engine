@@ -1,9 +1,14 @@
+/**
+ * @file dedupe_addon.hh
+ * @brief High-performance deduplication and redundancy detection engine.
+ */
+
 #ifndef DEDUPE_ADDON_HH
 #define DEDUPE_ADDON_HH
 
 #include "../nlp_addon_system.hh"
+#include "nlp/version.hh"
 #include "vector_addon.hh"
-#include <string>
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
@@ -19,26 +24,43 @@ namespace pce::nlp {
  * @brief Advanced deduplication for granular pattern detection.
  * Supports detection and removal of repeated segments based on normalization rules.
  */
-class DeduplicationAddon : public INLPAddon {
+class DeduplicationAddon : public NLPAddon<DeduplicationAddon> {
 public:
-    DeduplicationAddon() : name_("deduplication"), version_("2.2.0"), ready_(true) {}
+    /**
+     * @brief Construct a new Deduplication Addon object.
+     * Initializes with the global engine version and the "deduplication" plugin identity.
+     */
+    DeduplicationAddon() : name_("deduplication"), version_(NLP_ENGINE_VERSION), ready_(true) {}
 
-    const std::string& name() const override { return name_; }
-    const std::string& version() const override { return version_; }
+    /** @brief Rule of 5: Explicitly declared for modern C++ standards. */
+    virtual ~DeduplicationAddon() = default;
+    DeduplicationAddon(const DeduplicationAddon&) = default;
+    DeduplicationAddon& operator=(const DeduplicationAddon&) = default;
+    DeduplicationAddon(DeduplicationAddon&&) noexcept = default;
+    DeduplicationAddon& operator=(DeduplicationAddon&&) noexcept = default;
 
-    bool initialize() override { return true; }
+    /** @brief Returns the unique plugin name. */
+    const std::string& name_impl() const { return name_; }
+    /** @brief Returns the plugin version. */
+    const std::string& version_impl() const { return version_; }
 
-    void process_stream(const std::string& input,
-                        std::function<void(const std::string& chunk, bool is_final)> callback,
-                        const std::unordered_map<std::string, std::string>& options,
-                        std::shared_ptr<AddonContext> context = nullptr) override {
-        auto resp = process(input, options, context);
+    /** @brief Pre-flight initialization logic. */
+    bool init_impl() { return true; }
+
+    /**
+     * @brief Stream processing implementation.
+     * For deduplication, this is a wrapper around the synchronous process() call.
+     */
+    void process_stream_impl(const std::string& input,
+                             std::function<void(const std::string& chunk, bool is_final)> callback,
+                             const std::unordered_map<std::string, std::string>& options,
+                             std::shared_ptr<AddonContext> context = nullptr) {
+        auto resp = process_impl(input, options, context);
         callback(resp.output, true);
     }
 
-    void set_vector_engine(std::shared_ptr<VectorAddon> engine) {
-        vector_engine_ = engine;
-    }
+    /** @brief Attach a vector engine for semantic similarity checks. */
+    void set_vector_engine(std::shared_ptr<VectorAddon> engine) { vector_engine_ = engine; }
 
     /**
      * @brief Process text by segmenting it into phrases/sentences and identifying duplicates.
@@ -50,17 +72,30 @@ public:
      * - ignore_quotes: boolean string ("true"/"false") to strip quotes during comparison
      * - ignore_punctuation: boolean string ("true"/"false") to strip punctuation during comparison
      */
-    AddonResponse process(const std::string& input,
-                         const std::unordered_map<std::string, std::string>& options,
-                         std::shared_ptr<AddonContext> context = nullptr) override {
-
-        std::string mode = options.count("mode") ? options.at("mode") : "detect";
-        size_t min_len_threshold = options.count("min_length") ? std::stoul(options.at("min_length")) : 1;
-        bool ignore_quotes = options.count("ignore_quotes") && options.at("ignore_quotes") == "true";
-        bool ignore_punctuation = options.count("ignore_punctuation") && options.at("ignore_punctuation") == "true";
+    /**
+     * @brief Core deduplication logic using a "Native-First" approach.
+     *
+     * Processes the input text and identifies repeated segments. Results are stored
+     * in the AddonResponse maps (metadata/metrics) rather than as a JSON string.
+     *
+     * @param input Raw text to analyze.
+     * @param options Processing parameters (mode, min_length, skip_words, etc).
+     * @param context Optional session/document context.
+     * @return AddonResponse Native C++ result object.
+     */
+    AddonResponse process_impl(const std::string& input,
+                               const std::unordered_map<std::string, std::string>& options,
+                               std::shared_ptr<AddonContext> context = nullptr) {
+        std::string mode = options.contains("mode") ? options.at("mode") : "detect";
+        size_t min_len_threshold =
+            options.contains("min_length") ? std::stoul(options.at("min_length")) : 1;
+        bool ignore_quotes =
+            options.contains("ignore_quotes") && options.at("ignore_quotes") == "true";
+        bool ignore_punctuation =
+            options.contains("ignore_punctuation") && options.at("ignore_punctuation") == "true";
 
         std::unordered_set<std::string> skip_set;
-        if (options.count("skip_words") && !options.at("skip_words").empty()) {
+        if (options.contains("skip_words") && !options.at("skip_words").empty()) {
             std::stringstream ss(options.at("skip_words"));
             std::string w;
             while (std::getline(ss, w, ',')) {
@@ -109,7 +144,7 @@ public:
             // Unit tests suggest min_length applies to the segment being compared.
             if (seg.signature.length() < min_len_threshold) continue;
 
-            if (seen_signatures.count(seg.signature)) {
+            if (seen_signatures.contains(seg.signature)) {
                 seg.is_duplicate = true;
                 dup_count++;
             } else {
@@ -156,9 +191,14 @@ public:
         return resp;
     }
 
-    bool is_ready() const override { return ready_; }
+    /** @brief Internal implementation of the is_ready check for the CRTP system. */
+    bool is_ready_impl() const { return ready_; }
 
 private:
+    /**
+     * @brief Normalizes a single word for comparison.
+     * Strips punctuation and whitespace, converts to lowercase.
+     */
     std::string normalize_word(const std::string& s) {
         std::string res;
         for (unsigned char c : s) {
@@ -169,10 +209,16 @@ private:
         return res;
     }
 
+    /**
+     * @brief Creates a normalized signature for a text segment.
+     *
+     * Tokenizes the segment, applies normalization rules (quotes, punctuation, skip words),
+     * and joins the results into a stable signature string.
+     */
     std::string create_signature(const std::string& s,
-                                const std::unordered_set<std::string>& skip_set,
-                                bool ignore_quotes,
-                                bool ignore_punctuation) {
+                                 const std::unordered_set<std::string>& skip_set,
+                                 bool ignore_quotes,
+                                 bool ignore_punctuation) {
         std::stringstream ss;
         std::string word;
         std::string input_copy = s;
@@ -187,15 +233,15 @@ private:
             std::string w = i->str();
 
             if (ignore_quotes) {
-                w.erase(std::remove(w.begin(), w.end(), '\"'), w.end());
-                w.erase(std::remove(w.begin(), w.end(), '\''), w.end());
+                std::erase(w, '\"');
+                std::erase(w, '\'');
             }
             if (ignore_punctuation) {
-                w.erase(std::remove_if(w.begin(), w.end(), ::ispunct), w.end());
+                std::erase_if(w, ::ispunct);
             }
 
             std::string norm = normalize_word(w);
-            if (norm.empty() || skip_set.count(norm)) continue;
+            if (norm.empty() || skip_set.contains(norm)) continue;
 
             if (!first) ss << " ";
             ss << norm;

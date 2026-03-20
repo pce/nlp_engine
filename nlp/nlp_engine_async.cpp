@@ -129,19 +129,40 @@ std::string AsyncNLPEngine::process_sync(
             }
 
             try {
-                auto resp = addon->process(text, options, ctx);
-                if (!resp.success) {
-                    return "{\"error\": \"" + resp.error_message + "\"}";
+                /**
+                 * @brief Execute the addon logic.
+                 * "JSON at the Edge" - the addon returns a native C++ std::expected result (C++23).
+                 */
+                auto result = addon->process(text, options, ctx);
+
+                if (!result.has_value()) {
+                    return nlohmann::json({
+                        {"success", false},
+                        {"error", result.error()},
+                        {"status", "error"}
+                    }).dump();
                 }
 
+                const auto& resp = result.value();
+
+                /**
+                 * @brief Serialization Layer (The Edge)
+                 * We structure the native C++ result into a standard JSON contract here.
+                 */
                 nlohmann::json res_json;
                 res_json["output"] = resp.output;
                 res_json["metadata"] = resp.metadata;
                 res_json["metrics"] = resp.metrics;
                 res_json["success"] = true;
+                res_json["status"] = "success";
+
                 return res_json.dump();
             } catch (const std::exception& e) {
-                return "{\"error\": \"" + std::string(e.what()) + "\"}";
+                return nlohmann::json({
+                    {"success", false},
+                    {"error", std::string(e.what())},
+                    {"status", "exception"}
+                }).dump();
             }
         }
     }
@@ -153,6 +174,10 @@ std::string AsyncNLPEngine::process_sync(
     NLPEngine engine(model_);
     std::string lang = options.count("lang") ? options.at("lang") : "en";
 
+    /**
+     * @brief Fallback to Core Linguistic Engine
+     * Standardizes core model results into the same JSON contract.
+     */
     if (method == "language" || method == "detect_language") {
         return engine.language_to_json(engine.detect_language(text)).dump();
     } else if (method == "sentiment" || method == "analyze_sentiment") {
@@ -162,10 +187,19 @@ std::string AsyncNLPEngine::process_sync(
     } else if (method == "readability") {
         return engine.readability_to_json(engine.analyze_readability(text)).dump();
     } else if (method == "terminology") {
-        return json(engine.extract_terminology(text, lang)).dump();
+        nlohmann::json res;
+        res["output"] = "";
+        res["metadata"] = {{"count", std::to_string(engine.extract_terminology(text, lang).size())}};
+        res["metrics"] = {{"terms", static_cast<double>(engine.extract_terminology(text, lang).size())}};
+        res["success"] = true;
+        return res.dump();
     }
 
-    return "{\"error\": \"Unknown method: " + method + "\"}";
+    return nlohmann::json({
+        {"success", false},
+        {"error", "Unknown method: " + method},
+        {"status", "unsupported"}
+    }).dump();
 }
 
 std::string AsyncNLPEngine::process_text_async(
@@ -177,22 +211,29 @@ std::string AsyncNLPEngine::process_text_async(
 ) {
     if (!is_running_) return "";
 
-    return task_manager_->submit_task([this, text, addon_name, stream_callback, options, session_id]() {
-        std::shared_ptr<AddonContext> ctx = !session_id.empty() ? get_context(session_id) : nullptr;
+    return task_manager_->submit_task(
+        [this, text, addon_name, stream_callback, options, session_id]() -> AsyncResult {
+            std::shared_ptr<AddonContext> ctx =
+                !session_id.empty() ? get_context(session_id) : nullptr;
 
-        {
-            std::lock_guard<std::mutex> lock(addons_mutex_);
-            auto it = addons_.find(addon_name);
-            if (it != addons_.end()) {
-                auto resp = it->second->process(text, options, ctx);
-                if (stream_callback) stream_callback(resp.output, true);
-                return AsyncResult{resp.output, resp.success, resp.error_message, ""};
+            {
+                std::lock_guard<std::mutex> lock(addons_mutex_);
+                auto it = addons_.find(addon_name);
+                if (it != addons_.end()) {
+                    auto result = it->second->process(text, options, ctx);
+                    if (!result.has_value()) {
+                        if (stream_callback) stream_callback("[Error] " + result.error(), true);
+                        return AsyncResult{"", false, result.error(), ""};
+                    }
+                    const auto& resp = result.value();
+                    if (stream_callback) stream_callback(resp.output, true);
+                    return AsyncResult{resp.output, resp.success, resp.error_message, ""};
+                }
             }
-        }
 
-        if (stream_callback) stream_callback("Processing complete.\n", true);
-        return AsyncResult{"Success", true, "", ""};
-    });
+            if (stream_callback) stream_callback("Processing complete.\n", true);
+            return AsyncResult{"Success", true, "", ""};
+        });
 }
 
 std::string AsyncNLPEngine::submit_task(
@@ -215,7 +256,7 @@ void AsyncNLPEngine::stream_text(
 ) {
     if (!callback) return;
 
-    task_manager_->submit_task([this, text, addon_name, callback, options, session_id]() {
+    task_manager_->submit_task([this, text, addon_name, callback, options, session_id]() -> AsyncResult {
         std::shared_ptr<AddonContext> ctx = !session_id.empty() ? get_context(session_id) : nullptr;
 
         // Specialized path for Markov Streaming
@@ -231,7 +272,12 @@ void AsyncNLPEngine::stream_text(
                 }
 
                 // Fallback for other addons that only implement process()
-                auto resp = it->second->process(text, options, ctx);
+                auto result = it->second->process(text, options, ctx);
+                if (!result.has_value()) {
+                    callback("[Error] " + result.error(), true);
+                    return AsyncResult{"", false, result.error(), ""};
+                }
+                const auto& resp = result.value();
                 callback(resp.output, true);
                 return AsyncResult{resp.output, resp.success, resp.error_message, ""};
             }

@@ -54,6 +54,10 @@ struct AsyncResult {
  * @class AsyncTaskManager
  * @brief Manages the lifecycle and execution of asynchronous tasks.
  */
+/**
+ * @class AsyncTaskManager
+ * @brief Manages the lifecycle and execution of asynchronous tasks.
+ */
 class AsyncTaskManager {
 private:
     std::unordered_map<std::string, std::future<AsyncResult>> tasks_;
@@ -61,12 +65,30 @@ private:
     std::mutex tasks_mutex_;
 
 public:
+    /** @brief Default Constructor. */
+    AsyncTaskManager() = default;
+
+    /** @brief Rule of 5: Destructor handles thread joining. */
     ~AsyncTaskManager() {
         for (auto& t : workers_) {
             if (t.joinable()) t.join();
         }
     }
 
+    /** @brief Rule of 5: Deleted Copy Constructor. */
+    AsyncTaskManager(const AsyncTaskManager&) = delete;
+    /** @brief Rule of 5: Deleted Copy Assignment. */
+    AsyncTaskManager& operator=(const AsyncTaskManager&) = delete;
+    /** @brief Rule of 5: Deleted Move Constructor due to std::mutex. */
+    AsyncTaskManager(AsyncTaskManager&&) noexcept = delete;
+    /** @brief Rule of 5: Deleted Move Assignment due to std::mutex. */
+    AsyncTaskManager& operator=(AsyncTaskManager&&) noexcept = delete;
+
+    /**
+     * @brief Submits a functional task for asynchronous execution.
+     * @param task A function returning an AsyncResult.
+     * @return Unique task_id string.
+     */
     std::string submit_task(std::function<AsyncResult()> task);
     AsyncResult get_result(const std::string& task_id, bool wait = true);
     void cancel_task(const std::string& task_id);
@@ -77,25 +99,48 @@ public:
  * @class AsyncNLPEngine
  * @brief High-performance asynchronous wrapper for the NLP Engine and its Addons.
  */
+/**
+ * @class AsyncNLPEngine
+ * @brief High-performance asynchronous wrapper for the NLP Engine and its Addons.
+ *
+ * This class coordinates the interaction between the core linguistic models,
+ * registered addons, and the asynchronous task manager.
+ */
 class AsyncNLPEngine {
 private:
     std::shared_ptr<NLPModel> model_;
     std::unique_ptr<AsyncTaskManager> task_manager_;
 
-    // Addon storage: Using polymorphic pointers to ensure visibility across language boundaries.
+    /** @brief Addon storage: Using polymorphic pointers to ensure visibility across language boundaries. */
     std::unordered_map<std::string, std::shared_ptr<INLPAddon>> addons_;
     std::mutex addons_mutex_;
 
-    // Context storage: Persistent state for sessions or documents.
+    /** @brief Context storage: Persistent state for sessions or documents. */
     std::unordered_map<std::string, std::shared_ptr<AddonContext>> contexts_;
     std::mutex contexts_mutex_;
 
     bool is_running_;
 
 public:
+    /**
+     * @brief Construct AsyncNLPEngine with a shared linguistic model.
+     * @param model Shared pointer to an NLPModel.
+     */
     explicit AsyncNLPEngine(std::shared_ptr<NLPModel> model);
-    ~AsyncNLPEngine();
 
+    /** @brief Rule of 5: Virtual Destructor. */
+    virtual ~AsyncNLPEngine();
+
+    /** @brief Rule of 5: Deleted Copy Constructor. */
+    AsyncNLPEngine(const AsyncNLPEngine&) = delete;
+    /** @brief Rule of 5: Deleted Copy Assignment. */
+    AsyncNLPEngine& operator=(const AsyncNLPEngine&) = delete;
+    /** @brief Rule of 5: Deleted Move Constructor due to std::mutex. */
+    AsyncNLPEngine(AsyncNLPEngine&&) noexcept = delete;
+    /** @brief Rule of 5: Deleted Move Assignment due to std::mutex. */
+    AsyncNLPEngine& operator=(AsyncNLPEngine&&) noexcept = delete;
+
+    /** @brief Initialize engine state. */
     bool initialize();
     bool shutdown();
 

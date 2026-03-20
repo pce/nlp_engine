@@ -1,0 +1,21 @@
+{
+  "name": "pce-nlp-engine",
+  "version": "@PROJECT_VERSION@",
+  "description": "High-performance C++23 NLP Engine with Markov, Fractal, and Vector Addons.",
+  "maintainers": [
+    "pce"
+  ],
+  "license": "MIT",
+  "dependencies": [
+    "nlohmann-json",
+    "cpputest"
+  ],
+  "features": {
+    "python": {
+      "description": "Build Python bindings using pybind11",
+      "dependencies": [
+        "pybind11"
+      ]
+    }
+  }
+}

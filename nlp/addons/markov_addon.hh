@@ -1,3 +1,8 @@
+/**
+ * @file markov_addon.hh
+ * @brief High-performance Markov Chain text generation engine.
+ */
+
 #ifndef MARKOV_ADDON_HH
 #define MARKOV_ADDON_HH
 
@@ -13,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <nlohmann/json.hpp>
+#include "nlp/version.hh"
 #include "vector_addon.hh"
 
 namespace pce::nlp {
@@ -23,7 +29,10 @@ using json = nlohmann::json;
  * @class MarkovAddon
  * @brief High-performance C++23 Markov Chain Text Generator with N-Gram support.
  *
- * This version supports:
+ * This implementation follows the "Native-First" pattern, ensuring core generation
+ * logic is decoupled from serialization.
+ *
+ * Key Features:
  * 1. Variable N-Grams (Bigrams, Trigrams, etc.)
  * 2. Softmax Temperature Sampling for creativity control.
  * 3. Nucleus (Top-P) Sampling.
@@ -44,7 +53,7 @@ private:
     std::shared_ptr<VectorAddon> vector_engine_;
 
     std::string name_ = "markov_generator";
-    std::string version_ = "2.1.0";
+    std::string version_ = NLP_ENGINE_VERSION;
     bool ready_ = false;
 
     // Random engine for generation
@@ -84,56 +93,77 @@ private:
     }
 
 public:
+    /**
+     * @brief Construct a new Markov Addon object.
+     */
+    /** @brief Default Constructor. */
     MarkovAddon() = default;
+
+    /** @brief Rule of 5: Explicitly declared for modern C++ standards. */
+    virtual ~MarkovAddon() = default;
+    MarkovAddon(const MarkovAddon&) = default;
+    MarkovAddon& operator=(const MarkovAddon&) = default;
+    MarkovAddon(MarkovAddon&&) noexcept = default;
+    MarkovAddon& operator=(MarkovAddon&&) noexcept = default;
 
     // --- NLPAddon Implementation ---
 
+    /** @brief Internal implementation of name retrieval. */
     const std::string& name_impl() const { return name_; }
+    /** @brief Internal implementation of version retrieval. */
     const std::string& version_impl() const { return version_; }
 
+    /** @brief Manually override the model name. */
     void set_name(const std::string& new_name) { name_ = new_name; }
 
     /**
      * @brief Set the N-Gram context size. 2 = Bigram, 3 = Trigram.
+     * @param n The window size for the Markov chain.
      */
     void set_ngram_size(size_t n) { n_gram_size_ = n; }
 
     /**
-     * @brief Attach a vector engine for semantic rule-based post-processing.
+     * @brief Attach a vector engine for semantic rule-based filtering.
+     * @param engine Shared pointer to a VectorAddon instance.
      */
     void set_vector_engine(std::shared_ptr<VectorAddon> engine) {
         vector_engine_ = engine;
     }
 
+    /** @brief Internal initialization logic. */
     bool init_impl() {
         return true;
     }
 
     /**
-     * @brief Process text generation based on a seed.
+     * @brief Process text generation based on a seed (Streaming).
+     *
      * @param input The seed word or phrase.
-     * @param options { "length": "50", "temperature": "1.0", "top_p": "0.9", "use_hybrid": "true" }
+     * @param callback Function to receive generated chunks.
+     * @param options Generation parameters (length, temperature, top_p, n_gram).
+     * @param context Optional session context.
      */
     void process_stream_impl(const std::string& input,
                             std::function<void(const std::string& chunk, bool is_final)> callback,
                             const std::unordered_map<std::string, std::string>& options,
                             std::shared_ptr<AddonContext> context = nullptr) {
-        std::cout << "[Debug] stream_impl check. Ready: " << (ready_ ? "YES" : "NO") << " Chain size: " << chain_.size() << " Model: " << name_ << std::endl;
         if (!ready_) {
             return;
         }
 
-        std::cout << "[Debug] Markov Stream Start. Chain size: " << chain_.size() << std::endl;
-
-        int max_length = options.count("length") ? std::stoi(options.at("length")) : 50;
-        float temperature = options.count("temperature") ? std::stof(options.at("temperature")) : 1.0f;
-        float top_p = options.count("top_p") ? std::stof(options.at("top_p")) : 0.9f;
-        bool use_hybrid = options.count("use_hybrid") ? (options.at("use_hybrid") == "true") : false;
-        float semantic_threshold = options.count("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.3f;
-        int max_candidates = options.count("max_candidates") ? std::stoi(options.at("max_candidates")) : 100;
+        int max_length = options.contains("length") ? std::stoi(options.at("length")) : 50;
+        float temperature =
+            options.contains("temperature") ? std::stof(options.at("temperature")) : 1.0f;
+        float top_p = options.contains("top_p") ? std::stof(options.at("top_p")) : 0.9f;
+        bool use_hybrid =
+            options.contains("use_hybrid") ? (options.at("use_hybrid") == "true") : false;
+        float semantic_threshold =
+            options.contains("semantic_filter") ? std::stof(options.at("semantic_filter")) : 0.3f;
+        int max_candidates =
+            options.contains("max_candidates") ? std::stoi(options.at("max_candidates")) : 100;
 
         // Ensure n_gram_size is synced from options if provided
-        if (options.count("n_gram")) {
+        if (options.contains("n_gram")) {
             n_gram_size_ = std::max((size_t)2, (size_t)std::stoul(options.at("n_gram")));
         }
 
@@ -172,15 +202,9 @@ public:
             return;
         }
 
-        std::cout << "[Debug] Initial window: [" << join_window(window) << "]" << std::endl;
-
         for (int i = 0; i < max_length; ++i) {
             std::string key = join_window(window);
             auto it = chain_.find(key);
-
-            if (i % 10 == 0) {
-                std::cout << "[Debug] Iteration " << i << ", key: '" << key << "'" << std::endl;
-            }
 
             // Backoff strategy: if trigram not found, try bigram, etc.
             while (it == chain_.end() && !window.empty()) {
@@ -227,7 +251,7 @@ public:
             for (auto& cand : scored_candidates) cand.second /= sum_exp;
 
             // 2. Hybrid Semantic Filtering (Hardened)
-            if (use_hybrid && vector_engine_ && vector_engine_->is_ready() && !window.empty()) {
+            if (use_hybrid && vector_engine_ && vector_engine_->is_ready_impl() && !window.empty()) {
                 std::string context_word = window.back();
                 int attempts = 0;
                 for (auto& cand : scored_candidates) {
@@ -291,10 +315,20 @@ public:
         callback("", true);
     }
 
+    /**
+     * @brief Synchronous processing implementation.
+     *
+     * Wraps the streaming implementation to provide a standard AddonResponse.
+     * Follows the "JSON at the Edge" pattern by returning native structures.
+     *
+     * @param input The seed text.
+     * @param options Generation configuration.
+     * @param context Optional context.
+     * @return AddonResponse Native result container.
+     */
     AddonResponse process_impl(const std::string& input,
-                              const std::unordered_map<std::string, std::string>& options,
-                              std::shared_ptr<AddonContext> context = nullptr) {
-        std::cout << "[Debug] stream_impl check. Ready: " << (ready_ ? "YES" : "NO") << " Chain size: " << chain_.size() << " Model: " << name_ << std::endl;
+                               const std::unordered_map<std::string, std::string>& options,
+                               std::shared_ptr<AddonContext> context = nullptr) {
         if (!ready_) {
             return {"", false, "Markov model not loaded", {}};
         }
@@ -315,10 +349,13 @@ public:
         return resp;
     }
 
-    bool is_ready() const override { return ready_; }
+    /** @brief Checks if the Markov model is loaded and ready. */
+    bool is_ready_impl() const { return ready_; }
 
     /**
-     * @brief Loads a Knowledge Pack from JSON.
+     * @brief Loads a pre-trained Markov Knowledge Pack from a JSON file.
+     * @param path Filesystem path to the model JSON.
+     * @return True if loading was successful.
      */
     bool load_knowledge_pack(const std::string& path) {
         std::ifstream file(path);
@@ -344,13 +381,18 @@ public:
             }
         }
 
-        std::cout << "[Debug] Load Pack: " << path << " Ready: " << (!chain_.empty() ? "YES" : "NO") << " Items: " << chain_.size() << std::endl;
         ready_ = !chain_.empty();
         return ready_;
     }
 
     /**
-     * @brief Trains a model using N-Grams.
+     * @brief Trains a new Markov model from a source text file.
+     *
+     * Implementation of the ITrainable interface.
+     *
+     * @param source_path Path to the raw training text.
+     * @param model_output_path Path where the resulting JSON model should be saved.
+     * @return True if training completed and saved successfully.
      */
     bool train(const std::string& source_path, const std::string& model_output_path) override {
         std::ifstream file(source_path);
@@ -364,9 +406,14 @@ public:
             word = clean_word(word);
             if (word.empty()) continue;
 
-            if (history.size() == n_gram_size_ - 1) {
-                std::string key = join_window(history);
-                temp_chain[key][word]++;
+            // Build N-Gram connections for all sizes up to n_gram_size_
+            // This allows for better fallback when generating.
+            for (size_t size = 1; size < n_gram_size_; ++size) {
+                if (history.size() >= size) {
+                    std::vector<std::string> sub_history(history.end() - size, history.end());
+                    std::string key = join_window(sub_history);
+                    temp_chain[key][word]++;
+                }
             }
 
             history.push_back(word);
@@ -388,6 +435,7 @@ public:
         return true;
     }
 
+    /** @brief Returns current training progress (0.0 to 1.0). */
     float get_training_progress() const override { return ready_ ? 1.0f : 0.0f; }
 };
 

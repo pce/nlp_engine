@@ -10,7 +10,12 @@ interface TooltipProps {
 /**
  * A lightweight, accessible Tooltip component.
  */
-const Tooltip: React.FC<TooltipProps> = ({ content, children, position = "top", delay = 300 }) => {
+const Tooltip: React.FC<TooltipProps> = ({
+  content,
+  children,
+  position = "top",
+  delay = 300,
+}) => {
   const [isVisible, setIsVisible] = useState(false);
   const [timeoutId, setTimeoutId] = useState<NodeJS.Timeout | null>(null);
 
@@ -32,7 +37,13 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children, position = "top", 
   };
 
   return (
-    <div className="relative flex items-center" onMouseEnter={showTooltip} onMouseLeave={hideTooltip} onFocus={showTooltip} onBlur={hideTooltip}>
+    <div
+      className="relative flex items-center"
+      onMouseEnter={showTooltip}
+      onMouseLeave={hideTooltip}
+      onFocus={showTooltip}
+      onBlur={hideTooltip}
+    >
       {children}
       {isVisible && (
         <div

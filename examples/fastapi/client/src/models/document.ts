@@ -45,7 +45,10 @@ export class DocumentModel {
   /**
    * Creates a default initial state for a document.
    */
-  public static createInitialState(initialTitle: string = "Untitled Analysis", initialContent: string = ""): DocumentState {
+  public static createInitialState(
+    initialTitle: string = "Untitled Analysis",
+    initialContent: string = "",
+  ): DocumentState {
     return {
       title: initialTitle,
       content: initialContent,
@@ -78,7 +81,10 @@ export class DocumentModel {
   /**
    * Returns a new state with updated content and modified timestamp.
    */
-  public static updateContent(state: DocumentState, text: string): DocumentState {
+  public static updateContent(
+    state: DocumentState,
+    text: string,
+  ): DocumentState {
     return {
       ...state,
       content: text,
@@ -92,7 +98,10 @@ export class DocumentModel {
   /**
    * Returns a new state with an added highlight.
    */
-  public static addHighlight(state: DocumentState, range: TextRange): DocumentState {
+  public static addHighlight(
+    state: DocumentState,
+    range: TextRange,
+  ): DocumentState {
     return {
       ...state,
       selections: [...state.selections, range],

@@ -215,11 +215,18 @@ PYBIND11_MODULE(nlp_engine, m) {
         .def("process", [](FractalAddon& self, const std::string& input,
                            const std::unordered_map<std::string, std::string>& options,
                            std::shared_ptr<AddonContext> context) {
-            auto resp = self.process(input, options, context);
+            auto result = self.process(input, options, context);
             py::dict d;
+            if (!result.has_value()) {
+                d["success"] = false;
+                d["error"] = result.error();
+                return d;
+            }
+            const auto& resp = result.value();
             d["output"] = resp.output;
-            d["success"] = resp.success;
+            d["success"] = true;
             d["metadata"] = resp.metadata;
+            d["metrics"] = resp.metrics;
             return d;
         }, py::arg("input"),
            py::arg("options") = std::unordered_map<std::string, std::string>(),
@@ -233,10 +240,16 @@ PYBIND11_MODULE(nlp_engine, m) {
         .def("process", [](DeduplicationAddon& self, const std::string& input,
                            const std::unordered_map<std::string, std::string>& options,
                            std::shared_ptr<AddonContext> context) {
-            auto resp = self.process(input, options, context);
+            auto result = self.process(input, options, context);
             py::dict d;
+            if (!result.has_value()) {
+                d["success"] = false;
+                d["error"] = result.error();
+                return d;
+            }
+            const auto& resp = result.value();
             d["output"] = resp.output;
-            d["success"] = resp.success;
+            d["success"] = true;
             d["metadata"] = resp.metadata;
             d["metrics"] = resp.metrics;
             return d;
@@ -259,11 +272,18 @@ PYBIND11_MODULE(nlp_engine, m) {
         .def("process", [](MarkovAddon& self, const std::string& input,
                            const std::unordered_map<std::string, std::string>& options,
                            std::shared_ptr<AddonContext> context) {
-            auto resp = self.process(input, options, context);
+            auto result = self.process(input, options, context);
             py::dict d;
+            if (!result.has_value()) {
+                d["success"] = false;
+                d["error"] = result.error();
+                return d;
+            }
+            const auto& resp = result.value();
             d["output"] = resp.output;
-            d["success"] = resp.success;
-            d["error"] = resp.error_message;
+            d["success"] = true;
+            d["metadata"] = resp.metadata;
+            d["metrics"] = resp.metrics;
             return d;
         }, py::arg("input"),
            py::arg("options") = std::unordered_map<std::string, std::string>(),

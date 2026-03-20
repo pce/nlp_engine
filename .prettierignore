@@ -1,0 +1,28 @@
+# Prettier Ignore File
+
+# Ignore build artifacts
+**/build/**
+**/out/**
+**/dist/**
+**/_deps/**
+
+# Ignore dependency managers and environments
+**/.venv/**
+**/venv/**
+**/node_modules/**
+
+# Ignore generated files
+**/generated/**
+
+# Ignore external data and resources
+**/data/**
+**/training/**
+**/bak/**
+
+# Ignore lock files
+*.lock
+bun.lockb
+
+# Globally ignore Markdown and JSON
+**/*.md
+**/*.json

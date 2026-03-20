@@ -34,7 +34,9 @@ const Header: React.FC<HeaderProps> = ({
   const [internalIsGenerating, setInternalIsGenerating] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("generic_novel");
-  const [sessionId] = useState(() => `session_${Math.random().toString(36).substring(2, 11)}`);
+  const [sessionId] = useState(
+    () => `session_${Math.random().toString(36).substring(2, 11)}`,
+  );
 
   const [genOptions, setGenOptions] = useState({
     length: 150,
@@ -46,7 +48,10 @@ const Header: React.FC<HeaderProps> = ({
     fractalProb: 0.4,
   });
 
-  const isGenerating = externalIsGenerating !== undefined ? externalIsGenerating : internalIsGenerating;
+  const isGenerating =
+    externalIsGenerating !== undefined
+      ? externalIsGenerating
+      : internalIsGenerating;
   const setIsGenerating = setExternalIsGenerating || setInternalIsGenerating;
 
   useEffect(() => {
@@ -61,7 +66,8 @@ const Header: React.FC<HeaderProps> = ({
 
   const handleAction = async (method: string, options: any = {}) => {
     const textareas = Array.from(document.querySelectorAll("textarea"));
-    const visibleTextarea = textareas.find((t) => t.offsetParent !== null) || textareas[0];
+    const visibleTextarea =
+      textareas.find((t) => t.offsetParent !== null) || textareas[0];
 
     if (!visibleTextarea) return;
 
@@ -69,7 +75,11 @@ const Header: React.FC<HeaderProps> = ({
     try {
       const isFractal = method === "fractal" || method === "fractal_generator";
       const isDedupe = method === "dedupe" || method === "deduplication";
-      const pluginName = isFractal ? "fractal_generator" : isDedupe ? "deduplication" : method;
+      const pluginName = isFractal
+        ? "fractal_generator"
+        : isDedupe
+          ? "deduplication"
+          : method;
       const currentText = visibleTextarea.value;
 
       let response;
@@ -129,7 +139,9 @@ const Header: React.FC<HeaderProps> = ({
         const models = await nlpService.getAvailableModels();
         setAvailableModels(models);
         setSelectedModel(result.model);
-        onAnalysisResults?.(`[Log] Model training complete: ${result.model}\nN-Gram size: ${result.ngram_size}`);
+        onAnalysisResults?.(
+          `[Log] Model training complete: ${result.model}\nN-Gram size: ${result.ngram_size}`,
+        );
       }
     } catch (error) {
       console.error("Training failed:", error);
@@ -139,17 +151,26 @@ const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const handleGenerate = async (withInput: boolean = false, useStream: boolean = true) => {
+  const handleGenerate = async (
+    withInput: boolean = false,
+    useStream: boolean = true,
+  ) => {
     setIsGenerating(true);
     try {
       // Find the editor textarea specifically if it exists, otherwise fallback to visible
       const textareas = Array.from(document.querySelectorAll("textarea"));
-      const editorTextarea = (document.querySelector("#editor-area") as HTMLTextAreaElement) || textareas.find((t) => t.offsetParent !== null) || textareas[0];
+      const editorTextarea =
+        (document.querySelector("#editor-area") as HTMLTextAreaElement) ||
+        textareas.find((t) => t.offsetParent !== null) ||
+        textareas[0];
       const initialText = editorTextarea?.value || "";
 
       const seed = withInput
         ? editorTextarea?.selectionStart !== editorTextarea?.selectionEnd
-          ? initialText.substring(editorTextarea!.selectionStart, editorTextarea!.selectionEnd)
+          ? initialText.substring(
+              editorTextarea!.selectionStart,
+              editorTextarea!.selectionEnd,
+            )
           : initialText.slice(-100)
         : "";
       const baseText = "";
@@ -192,7 +213,13 @@ const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="p-4 sticky top-0 z-40 shadow-sm border-b" style={{ backgroundColor: "var(--theme-surface)", borderBottomColor: "var(--theme-border)" }}>
+    <header
+      className="p-4 sticky top-0 z-40 shadow-sm border-b"
+      style={{
+        backgroundColor: "var(--theme-surface)",
+        borderBottomColor: "var(--theme-border)",
+      }}
+    >
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Tooltip content={sidebarOpen ? "Close Sidebar" : "Open Sidebar"}>
@@ -205,9 +232,15 @@ const Header: React.FC<HeaderProps> = ({
             </button>
           </Tooltip>
 
-          <div className="h-6 w-px mx-2" style={{ backgroundColor: "var(--theme-border)" }} />
+          <div
+            className="h-6 w-px mx-2"
+            style={{ backgroundColor: "var(--theme-border)" }}
+          />
 
-          <h1 className="text-sm font-black uppercase tracking-tighter" style={{ color: "var(--theme-text)" }}>
+          <h1
+            className="text-sm font-black uppercase tracking-tighter"
+            style={{ color: "var(--theme-text)" }}
+          >
             NLP<span style={{ color: "var(--theme-primary)" }}>Studio</span>
           </h1>
         </div>
@@ -221,14 +254,33 @@ const Header: React.FC<HeaderProps> = ({
             genOptions={genOptions}
             setGenOptions={setGenOptions}
             onGenerate={handleGenerate}
-            onAction={(method, options) => handleAction(method === "fractal" ? "fractal_generator" : method, options)}
+            onAction={(method, options) =>
+              handleAction(
+                method === "fractal" ? "fractal_generator" : method,
+                options,
+              )
+            }
           />
 
-          <ToolkitDropdown onAction={(method, options) => handleAction(method === "dedupe" ? "deduplication" : method, options)} />
+          <ToolkitDropdown
+            onAction={(method, options) =>
+              handleAction(
+                method === "dedupe" ? "deduplication" : method,
+                options,
+              )
+            }
+          />
 
-          <SystemDropdown theme={theme} setTheme={(t: string) => setTheme(t as any)} availableThemes={availableThemes} />
+          <SystemDropdown
+            theme={theme}
+            setTheme={(t: string) => setTheme(t as any)}
+            availableThemes={availableThemes}
+          />
 
-          <div className="flex items-center gap-2 pl-2 border-l" style={{ borderLeftColor: "var(--theme-border)" }}>
+          <div
+            className="flex items-center gap-2 pl-2 border-l"
+            style={{ borderLeftColor: "var(--theme-border)" }}
+          >
             <StatsDashboard />
           </div>
         </div>

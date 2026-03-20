@@ -110,7 +110,9 @@ class NLPService {
    * Initiates an asynchronous processing task.
    * Returns a task_id that can be used for status polling or streaming.
    */
-  async submitAsyncTask(request: NLPRequest): Promise<{ task_id: string; status: string }> {
+  async submitAsyncTask(
+    request: NLPRequest,
+  ): Promise<{ task_id: string; status: string }> {
     try {
       const response = await fetch(`${this.baseUrl}/async-process`, {
         method: "POST",
@@ -133,7 +135,9 @@ class NLPService {
   /**
    * Polls for the status of a specific task.
    */
-  async getTaskStatus(taskId: string): Promise<{ task_id: string; status: string }> {
+  async getTaskStatus(
+    taskId: string,
+  ): Promise<{ task_id: string; status: string }> {
     const response = await fetch(`${this.baseUrl}/tasks/${taskId}`);
     if (!response.ok) throw new Error("Failed to fetch task status");
     return await response.json();
@@ -144,7 +148,11 @@ class NLPService {
    * In this architecture, we first submit the task to get a task_id,
    * then connect to the /stream/{task_id} endpoint.
    */
-  async streamNLP(request: NLPRequest, onChunk: StreamCallback, onError?: ErrorCallback): Promise<() => void> {
+  async streamNLP(
+    request: NLPRequest,
+    onChunk: StreamCallback,
+    onError?: ErrorCallback,
+  ): Promise<() => void> {
     let eventSource: EventSource | null = null;
     let isCancelled = false;
 
@@ -157,7 +165,10 @@ class NLPService {
 
     try {
       // 1. Submit the task as an async process
-      const { task_id } = await this.submitAsyncTask({ ...request, streaming: true });
+      const { task_id } = await this.submitAsyncTask({
+        ...request,
+        streaming: true,
+      });
 
       if (isCancelled) return cleanup;
 
@@ -212,18 +223,34 @@ class NLPService {
   /**
    * Generates text using a Markov model addon with streaming support.
    */
-  async generateMarkovStream(request: MarkovRequest, onChunk: (chunk: string, is_final: boolean) => void, onError?: (error: any) => void): Promise<() => void> {
+  async generateMarkovStream(
+    request: MarkovRequest,
+    onChunk: (chunk: string, is_final: boolean) => void,
+    onError?: (error: any) => void,
+  ): Promise<() => void> {
     const url = new URL(`${this.baseUrl}/generate-stream`);
     url.searchParams.append("seed", request.seed);
     url.searchParams.append("model", request.model || "generic_novel");
     url.searchParams.append("length", String(request.length || 150));
 
-    if (request.temperature !== undefined) url.searchParams.append("temperature", String(request.temperature));
-    if (request.top_p !== undefined) url.searchParams.append("top_p", String(request.top_p));
-    if (request.n_gram !== undefined) url.searchParams.append("n_gram", String(request.n_gram));
-    if (request.use_hybrid !== undefined) url.searchParams.append("use_hybrid", request.use_hybrid ? "true" : "false");
-    if (request.semantic_filter !== undefined) url.searchParams.append("semantic_filter", String(request.semantic_filter));
-    if (request.session_id) url.searchParams.append("session_id", request.session_id);
+    if (request.temperature !== undefined)
+      url.searchParams.append("temperature", String(request.temperature));
+    if (request.top_p !== undefined)
+      url.searchParams.append("top_p", String(request.top_p));
+    if (request.n_gram !== undefined)
+      url.searchParams.append("n_gram", String(request.n_gram));
+    if (request.use_hybrid !== undefined)
+      url.searchParams.append(
+        "use_hybrid",
+        request.use_hybrid ? "true" : "false",
+      );
+    if (request.semantic_filter !== undefined)
+      url.searchParams.append(
+        "semantic_filter",
+        String(request.semantic_filter),
+      );
+    if (request.session_id)
+      url.searchParams.append("session_id", request.session_id);
 
     // If options are passed explicitly as a record
     if (request.options) {
@@ -327,7 +354,11 @@ class NLPService {
   /**
    * Trains a new Markov model from the current editor content.
    */
-  async trainModel(request: { category: string; text: string; ngram_size: number }): Promise<any> {
+  async trainModel(request: {
+    category: string;
+    text: string;
+    ngram_size: number;
+  }): Promise<any> {
     try {
       const response = await fetch(`${this.baseUrl}/train-model`, {
         method: "POST",

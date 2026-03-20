@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <optional>
 #include <functional>
+#include <expected>
 
 /**
  * @file nlp_addon_system.hh
@@ -23,23 +24,66 @@ namespace pce::nlp {
 /**
  * @struct AddonContext
  * @brief Persistent state for a specific session or document.
+ *
+ * Used to maintain history or session-specific metadata across multiple
+ * calls to the same or different addons.
  */
 struct AddonContext {
+    /** @brief Unique identifier for the session. */
     std::string session_id;
+    /** @brief Key-value store for session-specific metadata. */
     std::unordered_map<std::string, std::string> metadata;
+    /** @brief List of previously processed strings or identifiers. */
     std::vector<std::string> history;
+
+    /** @brief Checks if a specific metadata key exists using C++23 contains(). */
+    bool has_meta(std::string_view key) const { return metadata.contains(std::string(key)); }
 };
 
 /**
  * @struct AddonResponse
  * @brief Standardized result from any NLP Addon operation.
+ *
+ * This structure follows the "Native-First" pattern. Internal C++ logic
+ * populates the native maps (metrics/metadata) for high-performance access,
+ * while the AsyncNLPEngine layer handles serialization for external APIs.
  */
 struct AddonResponse {
-    std::string output;                             ///< The primary output (text or JSON).
-    bool success = false;                           ///< Status of the operation.
-    std::string error_message;                      ///< Diagnostic info if success is false.
-    std::unordered_map<std::string, double> metrics; ///< Performance or logic metrics.
-    std::unordered_map<std::string, std::string> metadata; ///< Key-value pairs for structured response data.
+    /** @brief The primary result string (e.g., generated text or cleaned content). */
+    std::string output;
+
+    /** @brief Boolean indicating if the operation completed successfully. */
+    bool success = false;
+
+    /** @brief Diagnostic information or error details if success is false. */
+    std::string error_message;
+
+    /** @brief Numeric performance and logic metrics (e.g., "tokens_generated", "time_ms"). */
+    std::unordered_map<std::string, double> metrics;
+
+    /** @brief Structured metadata for the response (e.g., "dup_0_offset", "language"). */
+    std::unordered_map<std::string, std::string> metadata;
+
+    /** @brief Internal helper to check if the response contains specific metadata (C++23). */
+    bool has_meta(std::string_view key) const { return metadata.contains(std::string(key)); }
+
+    /** @brief Rule of 5: Explicitly declared for clarity and safety. */
+    AddonResponse() = default;
+    virtual ~AddonResponse() = default;
+    AddonResponse(const AddonResponse&) = default;
+    AddonResponse& operator=(const AddonResponse&) = default;
+    AddonResponse(AddonResponse&&) noexcept = default;
+    AddonResponse& operator=(AddonResponse&&) noexcept = default;
+
+    /**
+     * @brief Convenient constructor for quick responses.
+     */
+    AddonResponse(std::string out, bool succ, std::string err = "",
+                  std::unordered_map<std::string, double> met = {})
+        : output(std::move(out)),
+          success(succ),
+          error_message(std::move(err)),
+          metrics(std::move(met)) {}
 };
 
 /**
@@ -49,18 +93,31 @@ struct AddonResponse {
 class INLPAddon {
 public:
     virtual ~INLPAddon() = default;
+    /** @brief Get the unique name of the addon. */
     virtual const std::string& name() const = 0;
+    /** @brief Get the version string of the addon. */
     virtual const std::string& version() const = 0;
+    /** @brief Initialize the addon resources. */
     virtual bool initialize() = 0;
+    /** @brief Checks if the addon is initialized and ready for processing. */
     virtual bool is_ready() const = 0;
-    virtual AddonResponse process(const std::string& input,
-                                 const std::unordered_map<std::string, std::string>& options = {},
-                                 std::shared_ptr<AddonContext> context = nullptr) = 0;
+    /**
+     * @brief Process text and return a structured response.
+     * @return std::expected containing AddonResponse or an error string (C++23).
+     */
+    virtual std::expected<AddonResponse, std::string> process(
+        const std::string& input,
+        const std::unordered_map<std::string, std::string>& options = {},
+        std::shared_ptr<AddonContext> context = nullptr) = 0;
 
-    virtual void process_stream(const std::string& input,
-                               std::function<void(const std::string& chunk, bool is_final)> callback,
-                               const std::unordered_map<std::string, std::string>& options = {},
-                               std::shared_ptr<AddonContext> context = nullptr) = 0;
+    /**
+     * @brief Process text asynchronously via a stream callback.
+     */
+    virtual void process_stream(
+        const std::string& input,
+        std::function<void(const std::string& chunk, bool is_final)> callback,
+        const std::unordered_map<std::string, std::string>& options = {},
+        std::shared_ptr<AddonContext> context = nullptr) = 0;
 };
 
 /**
@@ -85,10 +142,17 @@ public:
         return static_cast<Derived*>(this)->init_impl();
     }
 
-    AddonResponse process(const std::string& input,
-                         const std::unordered_map<std::string, std::string>& options = {},
-                         std::shared_ptr<AddonContext> context = nullptr) override {
-        return static_cast<Derived*>(this)->process_impl(input, options, context);
+    bool is_ready() const override {
+        return static_cast<const Derived*>(this)->is_ready_impl();
+    }
+
+    std::expected<AddonResponse, std::string> process(
+        const std::string& input,
+        const std::unordered_map<std::string, std::string>& options = {},
+        std::shared_ptr<AddonContext> context = nullptr) override {
+        auto resp = static_cast<Derived*>(this)->process_impl(input, options, context);
+        if (!resp.success) return std::unexpected(std::string(resp.error_message));
+        return resp;
     }
 
     void process_stream(const std::string& input,
@@ -99,7 +163,7 @@ public:
     }
 
 protected:
-    ~NLPAddon() = default;
+    virtual ~NLPAddon() = default;
 };
 
 // --- Addon Collection ---
@@ -126,18 +190,10 @@ struct AddonVisitor {
     const std::string& input;
     const std::unordered_map<std::string, std::string>& options;
 
-    template <typename T>
-    AddonResponse operator()(const std::shared_ptr<T>& addon) const {
+    // Support for the base pointer interface or shared pointers to derived types
+    std::expected<AddonResponse, std::string> operator()(const std::shared_ptr<INLPAddon>& addon) const {
         if (!addon || !addon->is_ready()) {
-            return {"", false, "Addon not ready or null", {}};
-        }
-        return addon->process(input, options);
-    }
-
-    // Support for the base pointer interface
-    AddonResponse operator()(const std::shared_ptr<INLPAddon>& addon) const {
-        if (!addon || !addon->is_ready()) {
-            return {"", false, "Addon not ready or null", {}};
+            return std::unexpected(std::string("Addon not ready or null"));
         }
         return addon->process(input, options);
     }

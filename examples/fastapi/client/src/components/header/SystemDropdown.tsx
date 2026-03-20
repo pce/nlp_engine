@@ -13,11 +13,26 @@ interface SystemDropdownProps {
  * Handles system-wide settings like theme selection.
  * Styled using theme variables for brand consistency.
  */
-const SystemDropdown: React.FC<SystemDropdownProps> = ({ theme, setTheme, availableThemes }) => {
+const SystemDropdown: React.FC<SystemDropdownProps> = ({
+  theme,
+  setTheme,
+  availableThemes,
+}) => {
   return (
-    <Dropdown label="System" subLabel="Settings" icon="settings" variant="ghost">
-      <div className="px-4 pb-2 mb-2 border-b" style={{ borderBottomColor: "var(--theme-border)" }}>
-        <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: "var(--theme-text-muted)" }}>
+    <Dropdown
+      label="System"
+      subLabel="Settings"
+      icon="settings"
+      variant="ghost"
+    >
+      <div
+        className="px-4 pb-2 mb-2 border-b"
+        style={{ borderBottomColor: "var(--theme-border)" }}
+      >
+        <span
+          className="text-[9px] font-black uppercase tracking-widest"
+          style={{ color: "var(--theme-text-muted)" }}
+        >
           Theme
         </span>
       </div>
@@ -30,7 +45,8 @@ const SystemDropdown: React.FC<SystemDropdownProps> = ({ theme, setTheme, availa
               theme === t.name ? "" : "hover:bg-slate-500/10"
             }`}
             style={{
-              backgroundColor: theme === t.name ? "var(--theme-primary)" : "transparent",
+              backgroundColor:
+                theme === t.name ? "var(--theme-primary)" : "transparent",
               color: theme === t.name ? "#fff" : "var(--theme-text)",
             }}
           >

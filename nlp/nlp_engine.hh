@@ -232,6 +232,11 @@ public:
   std::vector<std::string> tokenize(const std::string& text);
 
   /**
+   * @brief Tokenizes text while preserving original case and removing punctuation.
+   */
+  std::vector<std::string> tokenize_with_case(const std::string& text);
+
+  /**
    * @brief Splits a document into individual sentences.
    */
   std::vector<std::string> split_sentences(const std::string& text);
@@ -280,7 +285,7 @@ public:
   std::vector<Keyword> extract_keywords(const std::string& text, int max_keywords = 10, const std::string& lang = "en");
 
   /**
-   * @brief Identifies technical or domain-specific terminology.
+   * @brief Identifies technical or domain-specific terminology using POS and capitalization heuristics.
    */
   std::vector<std::string> extract_terminology(const std::string& text, const std::string& lang = "en");
 

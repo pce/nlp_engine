@@ -1,5 +1,35 @@
 cmake_minimum_required(VERSION 3.25)
-project(nlp_engine VERSION 1.0.0 LANGUAGES CXX)
+project(nlp_engine VERSION 0.9.0 LANGUAGES CXX)
+
+# -----------------------------------------------------------------------------
+# Generate vcpkg.json from template to match project version
+# -----------------------------------------------------------------------------
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/vcpkg.json.in")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/vcpkg.json.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/vcpkg.json"
+        @ONLY
+    )
+    message(STATUS "Generated vcpkg.json for version ${PROJECT_VERSION}")
+endif()
+
+# -----------------------------------------------------------------------------
+# Version Header Generation
+# -----------------------------------------------------------------------------
+set(VERSION_H_IN "${CMAKE_CURRENT_SOURCE_DIR}/nlp/version.hh.in")
+set(VERSION_H_OUT "${CMAKE_CURRENT_BINARY_DIR}/generated/include/nlp/version.hh")
+
+if(NOT EXISTS "${VERSION_H_IN}")
+    file(WRITE "${VERSION_H_IN}"
+        "#pragma once\n\n"
+        "#define NLP_ENGINE_VERSION \"@PROJECT_VERSION@\"\n"
+        "#define NLP_ENGINE_VERSION_MAJOR @PROJECT_VERSION_MAJOR@\n"
+        "#define NLP_ENGINE_VERSION_MINOR @PROJECT_VERSION_MINOR@\n"
+        "#define NLP_ENGINE_VERSION_PATCH @PROJECT_VERSION_PATCH@\n"
+    )
+endif()
+
+configure_file("${VERSION_H_IN}" "${VERSION_H_OUT}" @ONLY)
 
 # -----------------------------------------------------------------------------
 # C++ Standard Configuration
@@ -26,16 +56,15 @@ FetchContent_MakeAvailable(json)
 option(BUILD_TESTING "Build the test suite" ON)
 option(BUILD_PYTHON_BINDINGS "Build Python bindings using pybind11" OFF)
 
-# CppUTest (Unit Testing & Memory Leak Detection)
+# Catch2 (Modern C++23 Unit Testing & Memory Safety)
 if(BUILD_TESTING)
     FetchContent_Declare(
-        cpputest
-        URL https://github.com/cpputest/cpputest/archive/refs/tags/v4.0.tar.gz
+        Catch2
+        URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz
     )
-    # Disable CppUTest's own internal testing and extensions we don't need to speed up build
-    set(TESTS OFF CACHE BOOL "Disable CppUTest internal tests" FORCE)
-    set(EXTENSIONS ON CACHE BOOL "Enable CppUTest extensions" FORCE)
-    FetchContent_MakeAvailable(cpputest)
+    # Force static linkage for Catch2 to avoid runtime relocation segfaults on macOS with LLVM 22
+    set(CATCH_BUILD_STATIC_LIBRARY ON CACHE BOOL "Build Catch2 as a static library" FORCE)
+    FetchContent_MakeAvailable(Catch2)
 endif()
 
 # -----------------------------------------------------------------------------
@@ -49,16 +78,22 @@ add_library(nlp_engine
 )
 
 target_include_directories(nlp_engine PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nlp>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>
 )
 
 # Link JSON
-target_link_libraries(nlp_engine PUBLIC nlohmann_json::nlohmann_json)
+# We use BUILD_INTERFACE to ensure that nlohmann_json is only required during the build,
+# preventing export errors since the dependency is managed via FetchContent.
+target_link_libraries(nlp_engine PUBLIC $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
 # -----------------------------------------------------------------------------
 # Python Bindings (Optional)
 # -----------------------------------------------------------------------------
 if(BUILD_PYTHON_BINDINGS)
+    # PkgConfig is often missing on macOS/Windows; handle gracefully
+    find_package(PkgConfig QUIET)
     find_package(Python COMPONENTS Interpreter Development REQUIRED)
 
     FetchContent_Declare(
@@ -120,22 +155,27 @@ add_dependencies(nlp_example_textgen prepare_data)
 if(BUILD_TESTING)
     enable_testing()
 
-    # Standard Tests (now using CppUTest)
+    # Standard Tests (Catch2)
     add_executable(nlp_tests tests/test_nlp.cpp)
-    target_link_libraries(nlp_tests PRIVATE nlp_engine CppUTest CppUTestExt)
+    target_link_libraries(nlp_tests PRIVATE nlp_engine Catch2::Catch2WithMain)
     add_dependencies(nlp_tests prepare_data)
     add_test(NAME nlp_engine_test COMMAND nlp_tests)
 
-    # Async & Integration Tests (now using CppUTest)
+    # Linguistic Precision Tests (Catch2)
+    add_executable(nlp_tests_linguistics tests/test_nlp_linguistics.cpp)
+    target_link_libraries(nlp_tests_linguistics PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_dependencies(nlp_tests_linguistics prepare_data)
+    add_test(NAME nlp_engine_linguistics_test COMMAND nlp_tests_linguistics)
+
+    # Async & Integration Tests (Catch2)
     add_executable(nlp_tests_async tests/test_nlp_async.cpp)
-    target_link_libraries(nlp_tests_async PRIVATE nlp_engine CppUTest CppUTestExt)
+    target_link_libraries(nlp_tests_async PRIVATE nlp_engine Catch2::Catch2WithMain)
     add_dependencies(nlp_tests_async prepare_data)
     add_test(NAME nlp_engine_async_test COMMAND nlp_tests_async)
 
-    # Markov Addon Tests (Professional Suite with CppUTest)
+    # Markov Addon Tests (Catch2)
     add_executable(nlp_tests_markov tests/test_nlp_markov.cpp)
-    target_link_libraries(nlp_tests_markov PRIVATE nlp_engine CppUTest CppUTestExt)
-    target_compile_definitions(nlp_tests_markov PRIVATE CPPUTEST_MEM_LEAK_DETECTION_DISABLED=0)
+    target_link_libraries(nlp_tests_markov PRIVATE nlp_engine Catch2::Catch2WithMain)
     add_dependencies(nlp_tests_markov prepare_data)
     add_test(NAME nlp_engine_markov_test COMMAND nlp_tests_markov)
 endif()
@@ -181,6 +221,58 @@ if(DOXYGEN_FOUND)
 endif()
 
 # -----------------------------------------------------------------------------
+# Code Style & Linting (clang-format & bun)
+# -----------------------------------------------------------------------------
+find_program(CLANG_FORMAT_EXE clang-format)
+find_program(BUN_EXE bun)
+
+file(GLOB_RECURSE ALL_CXX_SOURCE_FILES
+    nlp/*.cpp nlp/*.hh
+    tests/*.cpp
+    examples/*.cpp
+    training/*.cpp
+)
+
+if(CLANG_FORMAT_EXE)
+    add_custom_target(format
+        COMMAND ${CLANG_FORMAT_EXE} -i ${ALL_CXX_SOURCE_FILES}
+        COMMENT "Formatting C++ source files with clang-format"
+        VERBATIM
+    )
+
+    add_custom_target(lint-check
+        COMMAND ${CLANG_FORMAT_EXE} --dry-run -Werror ${ALL_CXX_SOURCE_FILES}
+        COMMENT "Checking C++ code style with clang-format"
+        VERBATIM
+    )
+else()
+    add_custom_target(format
+        COMMAND ${CMAKE_COMMAND} -E echo "clang-format not found, skipping format."
+    )
+    add_custom_target(lint-check
+        COMMAND ${CMAKE_COMMAND} -E echo "clang-format not found, skipping lint check."
+    )
+endif()
+
+if(BUN_EXE)
+    # Check if a frontend or bun-based directory exists (e.g., in project root or subdirs)
+    # Assuming bun files are in the project or a typical 'frontend' location if applicable
+    add_custom_target(format-bun
+        COMMAND ${BUN_EXE} format --write .
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Formatting JS/TS/JSON files with bun"
+        VERBATIM
+    )
+
+    add_custom_target(lint-bun
+        COMMAND ${BUN_EXE} lint .
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Linting JS/TS files with bun"
+        VERBATIM
+    )
+endif()
+
+# -----------------------------------------------------------------------------
 # Build Summary
 # -----------------------------------------------------------------------------
 message(STATUS "")
@@ -191,4 +283,6 @@ message(STATUS "C++ Standard:    ${CMAKE_CXX_STANDARD}")
 message(STATUS "Doxygen Found:   ${DOXYGEN_FOUND}")
 message(STATUS "Build Testing:   ${BUILD_TESTING}")
 message(STATUS "Python Bindings: ${BUILD_PYTHON_BINDINGS}")
+message(STATUS "Clang-Format:    ${CLANG_FORMAT_EXE}")
+message(STATUS "Bun:             ${BUN_EXE}")
 message(STATUS "")

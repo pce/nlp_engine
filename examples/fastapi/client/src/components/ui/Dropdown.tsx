@@ -15,14 +15,25 @@ interface DropdownProps {
  * Reusable Dropdown Component
  * Handles click-outside logic, accessibility, and consistent styling.
  */
-const Dropdown: React.FC<DropdownProps> = ({ label, subLabel, icon, variant = "primary", children, align = "right", width = "w-64" }) => {
+const Dropdown: React.FC<DropdownProps> = ({
+  label,
+  subLabel,
+  icon,
+  variant = "primary",
+  children,
+  align = "right",
+  width = "w-64",
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
       }
     };
@@ -43,25 +54,29 @@ const Dropdown: React.FC<DropdownProps> = ({ label, subLabel, icon, variant = "p
 
   const variantStyles = {
     primary: {
-      active: "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 shadow-sm",
+      active:
+        "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 shadow-sm",
       button: "bg-indigo-600 text-white",
       text: "text-indigo-600 dark:text-indigo-400",
       themeColor: "var(--theme-primary)",
     },
     warning: {
-      active: "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 shadow-sm",
+      active:
+        "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 shadow-sm",
       button: "bg-amber-500 text-white",
       text: "text-amber-600 dark:text-amber-400",
       themeColor: "var(--theme-warning)",
     },
     danger: {
-      active: "bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 shadow-sm",
+      active:
+        "bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 shadow-sm",
       button: "bg-rose-600 text-white",
       text: "text-rose-600 dark:text-rose-400",
       themeColor: "var(--theme-danger)",
     },
     ghost: {
-      active: "bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 shadow-sm",
+      active:
+        "bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 shadow-sm",
       button: "bg-slate-500 text-white",
       text: "text-slate-700 dark:text-slate-200",
       themeColor: "var(--theme-text)",
@@ -81,15 +96,23 @@ const Dropdown: React.FC<DropdownProps> = ({ label, subLabel, icon, variant = "p
         }`}
         style={{
           backgroundColor: "var(--theme-surface)",
-          borderColor: isOpen ? currentStyles.themeColor : "var(--theme-border)",
+          borderColor: isOpen
+            ? currentStyles.themeColor
+            : "var(--theme-border)",
           color: "var(--theme-text)",
         }}
       >
         <div className="flex flex-col items-end text-[10px] font-black uppercase tracking-widest">
-          <span className="text-slate-400" style={{ color: "var(--theme-text-muted)" }}>
+          <span
+            className="text-slate-400"
+            style={{ color: "var(--theme-text-muted)" }}
+          >
             {label}
           </span>
-          <span className={currentStyles.text} style={{ color: currentStyles.themeColor }}>
+          <span
+            className={currentStyles.text}
+            style={{ color: currentStyles.themeColor }}
+          >
             {subLabel}
           </span>
         </div>
@@ -98,7 +121,9 @@ const Dropdown: React.FC<DropdownProps> = ({ label, subLabel, icon, variant = "p
           <div
             className={`p-1.5 rounded-lg transition-colors ${isOpen ? "" : "opacity-70"}`}
             style={{
-              backgroundColor: isOpen ? currentStyles.themeColor : "var(--theme-bg)",
+              backgroundColor: isOpen
+                ? currentStyles.themeColor
+                : "var(--theme-bg)",
               color: isOpen ? "#fff" : "var(--theme-text-muted)",
             }}
           >
@@ -114,7 +139,8 @@ const Dropdown: React.FC<DropdownProps> = ({ label, subLabel, icon, variant = "p
           style={{
             backgroundColor: "var(--theme-surface)",
             borderColor: "var(--theme-border)",
-            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)",
+            boxShadow:
+              "0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)",
           }}
         >
           {children}

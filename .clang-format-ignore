@@ -1,0 +1,18 @@
+# Clang-Format Ignore File
+
+# Ignore build artifacts
+build/**
+out/**
+_deps/**
+
+# Ignore dependency managers and environments
+.venv/**
+venv/**
+node_modules/**
+
+# Ignore generated files
+generated/**
+
+# Ignore external data
+data/**
+training/**

@@ -12,7 +12,13 @@ interface ToggleProps {
  * A reusable, theme-aware Toggle switch component.
  * Respects CSS variables for background, primary, and surface colors.
  */
-const Toggle: React.FC<ToggleProps> = ({ label, checked, onChange, disabled = false, size = "md" }) => {
+const Toggle: React.FC<ToggleProps> = ({
+  label,
+  checked,
+  onChange,
+  disabled = false,
+  size = "md",
+}) => {
   const isSm = size === "sm";
 
   return (
@@ -26,7 +32,10 @@ const Toggle: React.FC<ToggleProps> = ({ label, checked, onChange, disabled = fa
       `}
     >
       {label && (
-        <span className="text-[10px] font-bold" style={{ color: "var(--theme-text)" }}>
+        <span
+          className="text-[10px] font-bold"
+          style={{ color: "var(--theme-text)" }}
+        >
           {label}
         </span>
       )}
@@ -35,7 +44,11 @@ const Toggle: React.FC<ToggleProps> = ({ label, checked, onChange, disabled = fa
           relative rounded-full transition-colors duration-200 ease-in-out
           ${isSm ? "w-7 h-4" : "w-8 h-4.5"}
         `}
-        style={{ backgroundColor: checked ? "var(--theme-primary)" : "var(--theme-border)" }}
+        style={{
+          backgroundColor: checked
+            ? "var(--theme-primary)"
+            : "var(--theme-border)",
+        }}
       >
         <div
           className={`

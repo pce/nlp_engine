@@ -160,25 +160,59 @@ std::vector<std::string> NLPEngine::tokenize(const std::string& text) {
     return tokens;
 }
 
+std::vector<std::string> NLPEngine::tokenize_with_case(const std::string& text) {
+    std::vector<std::string> tokens;
+    std::istringstream iss(text);
+    std::string word;
+    while (iss >> word) {
+        std::string clean = word;
+        clean.erase(std::remove_if(clean.begin(), clean.end(), [](unsigned char c) { return std::ispunct(c); }), clean.end());
+        if (!clean.empty()) tokens.push_back(clean);
+    }
+    return tokens;
+}
+
 std::vector<std::string> NLPEngine::split_sentences(const std::string& text) {
     std::vector<std::string> sentences;
     std::string current;
-    bool in_quote = false;
+    bool in_double_quote = false;
+    bool in_single_quote = false;
+
     for (size_t i = 0; i < text.length(); ++i) {
         char c = text[i];
         current += c;
-        if (c == '"' || c == '\'') in_quote = !in_quote;
-        if (!in_quote && (c == '.' || c == '!' || c == '?')) {
-            if (i + 1 == text.length() || std::isspace(text[i + 1])) {
+
+        if (c == '"' && !in_single_quote) in_double_quote = !in_double_quote;
+        else if (c == '\'' && !in_double_quote) in_single_quote = !in_single_quote;
+
+        bool in_any_quote = in_double_quote || in_single_quote;
+
+        if (!in_any_quote && (c == '.' || c == '!' || c == '?')) {
+            // Check if we are at the end of the string or followed by whitespace
+            if (i + 1 == text.length() || std::isspace(static_cast<unsigned char>(text[i + 1]))) {
                 size_t first = current.find_first_not_of(" \t\n\r");
-                if (first != std::string::npos) sentences.push_back(current.substr(first));
+                if (first != std::string::npos) {
+                    std::string segment = current.substr(first);
+                    // Trim trailing whitespace
+                    size_t last = segment.find_last_not_of(" \t\n\r");
+                    if (last != std::string::npos) {
+                        sentences.push_back(segment.substr(0, last + 1));
+                    }
+                }
                 current.clear();
             }
         }
     }
+
     if (!current.empty()) {
         size_t first = current.find_first_not_of(" \t\n\r");
-        if (first != std::string::npos) sentences.push_back(current.substr(first));
+        if (first != std::string::npos) {
+            std::string segment = current.substr(first);
+            size_t last = segment.find_last_not_of(" \t\n\r");
+            if (last != std::string::npos) {
+                sentences.push_back(segment.substr(0, last + 1));
+            }
+        }
     }
     return sentences;
 }
@@ -195,7 +229,29 @@ std::vector<std::string> NLPEngine::remove_stopwords(const std::vector<std::stri
 }
 
 std::string NLPEngine::normalize(const std::string& text) {
-    return remove_punctuation(to_lower(text));
+    std::string lower = to_lower(text);
+    std::string res;
+    res.reserve(lower.size());
+
+    for (unsigned char c : lower) {
+        if (std::ispunct(c)) {
+            res += ' ';
+        } else {
+            res += static_cast<char>(c);
+        }
+    }
+
+    // Trim and collapse multiple spaces
+    std::string trimmed;
+    std::istringstream iss(res);
+    std::string word;
+    bool first = true;
+    while (iss >> word) {
+        if (!first) trimmed += " ";
+        trimmed += word;
+        first = false;
+    }
+    return trimmed;
 }
 
 std::vector<Correction> NLPEngine::spell_check(const std::string& text, const std::string& lang) {
@@ -266,6 +322,8 @@ std::map<std::string, float> NLPEngine::calculate_tfidf(const std::string& text)
     auto sentences = split_sentences(text);
     auto tokens = tokenize(text);
     auto filtered = remove_stopwords(tokens);
+    if (filtered.empty()) return {};
+
     std::unordered_map<std::string, int> term_counts;
     for (const auto& t : filtered) term_counts[t]++;
 
@@ -273,8 +331,20 @@ std::map<std::string, float> NLPEngine::calculate_tfidf(const std::string& text)
     for (const auto& [term, count] : term_counts) {
         float tf = (float)count / filtered.size();
         int df = 0;
-        for (const auto& s : sentences) if (to_lower(s).find(term) != std::string::npos) df++;
-        tfidf[term] = tf * std::log((float)sentences.size() / (1 + df));
+        for (const auto& s : sentences) {
+            std::string ls = to_lower(s);
+            // Search for whole word to avoid partial matches
+            size_t pos = ls.find(term);
+            if (pos != std::string::npos) {
+                // Simple boundary check
+                bool start_ok = (pos == 0 || !std::isalnum(static_cast<unsigned char>(ls[pos - 1])));
+                bool end_ok = (pos + term.length() == ls.length() || !std::isalnum(static_cast<unsigned char>(ls[pos + term.length()])));
+                if (start_ok && end_ok) df++;
+            }
+        }
+        // Use smooth IDF to avoid log(0) and division by zero
+        float idf = std::log((float)sentences.size() / (1.0f + df)) + 1.0f;
+        tfidf[term] = tf * idf;
     }
     return tfidf;
 }
@@ -290,10 +360,55 @@ std::vector<Keyword> NLPEngine::extract_keywords(const std::string& text, int ma
 
 std::vector<std::string> NLPEngine::extract_terminology(const std::string& text, const std::string& lang) {
     std::vector<std::string> terms;
-    auto tokens = tokenize(text);
-    for (size_t i = 0; i < tokens.size() - 1; ++i) {
-        if (std::isupper(tokens[i][0]) && std::isupper(tokens[i+1][0])) terms.push_back(tokens[i] + " " + tokens[i+1]);
+    auto tokens = tokenize_with_case(text);
+    if (tokens.empty()) return terms;
+
+    auto tagged = pos_tag(tokens, lang);
+
+    // Heuristic 1: Acronyms (IBM, NASA, etc.) - All caps, length > 1
+    for (const auto& token : tokens) {
+        if (token.length() > 1 && std::all_of(token.begin(), token.end(), [](unsigned char c) { return std::isupper(c); })) {
+            if (std::find(terms.begin(), terms.end(), token) == terms.end()) {
+                terms.push_back(token);
+            }
+        }
     }
+
+    // Heuristic 2: Multi-word Proper Nouns (Noun + Noun where both are capitalized)
+    // We look for sequences of Proper Nouns (NNP equivalent in our basic tagger)
+    for (size_t i = 0; i < tagged.size(); ++i) {
+        if (tagged[i].second == "NNP") {
+            std::string compound = tagged[i].first;
+            size_t j = i + 1;
+            while (j < tagged.size() && tagged[j].second == "NNP") {
+                compound += " " + tagged[j].first;
+                j++;
+            }
+
+            if (j > i + 1) { // It's a compound
+                if (std::find(terms.begin(), terms.end(), compound) == terms.end()) {
+                    terms.push_back(compound);
+                }
+                i = j - 1; // Skip the words we just consumed
+            } else {
+                // Single NNP (like "Linux" or "Apple")
+                if (std::find(terms.begin(), terms.end(), compound) == terms.end()) {
+                    terms.push_back(compound);
+                }
+            }
+        }
+    }
+
+    // Heuristic 3: Technical Noun Phrases (Adjective + Noun)
+    for (size_t i = 0; i < tagged.size() - 1; ++i) {
+        if (tagged[i].second == "JJ" && tagged[i + 1].second == "NN") {
+            std::string phrase = tagged[i].first + " " + tagged[i + 1].first;
+            if (std::find(terms.begin(), terms.end(), phrase) == terms.end()) {
+                terms.push_back(phrase);
+            }
+        }
+    }
+
     return terms;
 }
 
@@ -301,12 +416,45 @@ std::vector<std::pair<std::string, std::string>> NLPEngine::pos_tag(const std::v
     std::vector<std::pair<std::string, std::string>> tagged;
     if (!model_) return tagged;
     const auto& stops = model_->get_stopwords(lang);
-    std::unordered_set<std::string> stop_set(stops.begin(), stops.end());
+    std::unordered_set<std::string> stop_set;
+    for (const auto& s : stops) stop_set.insert(to_lower(s));
 
-    for (const auto& t : tokens) {
-        std::string tag = "NN";
-        if (stop_set.count(to_lower(t))) tag = "DET";
-        else if (t.length() > 3 && t.substr(t.length() - 2) == "ly") tag = "ADV";
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const std::string& t = tokens[i];
+        std::string lower_t = to_lower(t);
+        std::string tag = "NN"; // Default to Noun
+
+        // Check if it's a stopword/determiner
+        if (stop_set.count(lower_t)) {
+            tag = "DET";
+        }
+        // Heuristic for Proper Nouns: Capitalized and not at start of sentence, or All Caps
+        else if (!t.empty() && std::isupper(static_cast<unsigned char>(t[0]))) {
+            bool is_all_caps = std::all_of(t.begin(), t.end(), [](unsigned char c) { return std::isupper(c); });
+            if (is_all_caps || i > 0) {
+                tag = "NNP";
+            } else {
+                // If it's the first word, it might just be capitalized because of the sentence.
+                // If it's not in the dictionary as a common word, treat as NNP.
+                const auto& dict = model_->get_dictionary(lang);
+                if (std::find(dict.begin(), dict.end(), lower_t) == dict.end()) {
+                    tag = "NNP";
+                }
+            }
+        }
+        // Adverbs ending in -ly
+        else if (t.length() > 3 && t.substr(t.length() - 2) == "ly") {
+            tag = "ADV";
+        }
+        // Adjectives ending in -al, -ic, -ive, -ous
+        else if (t.length() > 4) {
+            std::string suffix2 = t.substr(t.length() - 2);
+            std::string suffix3 = t.substr(t.length() - 3);
+            if (suffix2 == "al" || suffix2 == "ic" || suffix3 == "ive" || suffix3 == "ous") {
+                tag = "JJ";
+            }
+        }
+
         tagged.push_back({t, tag});
     }
     return tagged;

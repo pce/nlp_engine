@@ -1,3 +1,8 @@
+/**
+ * @file fractal_addon.hh
+ * @brief Recursive fractal text generation engine.
+ */
+
 #ifndef FRACTAL_ADDON_HH
 #define FRACTAL_ADDON_HH
 
@@ -20,49 +25,82 @@ namespace pce::nlp {
  * into branches, using a Markov source for local texture and an optional
  * Vector engine to maintain thematic consistency across branches.
  */
-class FractalAddon : public INLPAddon {
+class FractalAddon : public NLPAddon<FractalAddon> {
 public:
-    FractalAddon() : name_("fractal_generator"), version_("1.1.0"), depth_(3), segment_length_(20), ready_(false) {
+    /**
+     * @brief Construct a new Fractal Addon object.
+     * Initializes the random engine and sets default generation parameters.
+     */
+    FractalAddon()
+        : name_("fractal_generator"), version_("1.2.0"), depth_(3), segment_length_(20), ready_(false) {
         std::random_device rd;
         gen_.seed(rd());
     }
 
-    const std::string& name() const override { return name_; }
-    const std::string& version() const override { return version_; }
+    /** @brief Rule of 5: Explicitly declared for modern C++ standards. */
+    virtual ~FractalAddon() = default;
+    FractalAddon(const FractalAddon&) = default;
+    FractalAddon& operator=(const FractalAddon&) = default;
+    FractalAddon(FractalAddon&&) noexcept = default;
+    FractalAddon& operator=(FractalAddon&&) noexcept = default;
 
-    bool initialize() override { return true; }
+    /** @brief Returns the unique plugin name. */
+    const std::string& name_impl() const { return name_; }
+    /** @brief Returns the plugin version. */
+    const std::string& version_impl() const { return version_; }
 
-    void process_stream(const std::string& input,
-                        std::function<void(const std::string& chunk, bool is_final)> callback,
-                        const std::unordered_map<std::string, std::string>& options,
-                        std::shared_ptr<AddonContext> context = nullptr) override {
-        auto resp = process(input, options, context);
+    /** @brief Pre-flight initialization logic. */
+    bool init_impl() { return true; }
+
+    /**
+     * @brief Stream processing implementation.
+     * For the fractal engine, this currently wraps the recursive process() call.
+     */
+    void process_stream_impl(const std::string& input,
+                             std::function<void(const std::string& chunk, bool is_final)> callback,
+                             const std::unordered_map<std::string, std::string>& options,
+                             std::shared_ptr<AddonContext> context = nullptr) {
+        auto resp = process_impl(input, options, context);
         callback(resp.output, true);
     }
 
+    /**
+     * @brief Attach the primary Markov source used for segment generation.
+     * @param source Shared pointer to a MarkovAddon.
+     */
     void set_markov_source(std::shared_ptr<MarkovAddon> source) {
         markov_source_ = source;
         if (source) ready_ = true;
     }
 
+    /**
+     * @brief Attach a vector engine for thematic consistency.
+     * @param engine Shared pointer to a VectorAddon.
+     */
     void set_vector_engine(std::shared_ptr<VectorAddon> engine) {
         vector_engine_ = engine;
     }
 
     /**
-     * @brief Process a fractal generation request.
-     * @param options { "depth": "3", "length": "20", "temperature": "1.0" }
+     * @brief Process a fractal generation request using a "Native-First" approach.
+     *
+     * Recursively splits the generation task into branches. Results are stored
+     * in the AddonResponse maps (metadata/metrics) rather than as a JSON string.
+     *
+     * @param input The seed text or thematic anchor.
+     * @param options Processing parameters (depth, length, temperature, n_gram).
+     * @param context Optional session/document context.
+     * @return AddonResponse Native C++ result object.
      */
-    AddonResponse process(const std::string& input,
-                         const std::unordered_map<std::string, std::string>& options,
-                         std::shared_ptr<AddonContext> context = nullptr) override {
-
+    AddonResponse process_impl(const std::string& input,
+                               const std::unordered_map<std::string, std::string>& options,
+                               std::shared_ptr<AddonContext> context = nullptr) {
         if (!markov_source_) {
             return {"", false, "Fractal engine requires a Markov source instance.", {}};
         }
 
-        int depth = options.count("depth") ? std::stoi(options.at("depth")) : 3;
-        int seg_len = options.count("length") ? std::stoi(options.at("length")) : 20;
+        int depth = options.contains("depth") ? std::stoi(options.at("depth")) : 3;
+        int seg_len = options.contains("length") ? std::stoi(options.at("length")) : 20;
 
         // Ensure parameters are sane
         depth = std::clamp(depth, 0, 5); // Prevent stack overflow
@@ -83,8 +121,9 @@ public:
         return resp;
     }
 
-    bool is_ready() const override {
-        return true;
+    /** @brief Checks if the addon has a valid Markov source and is ready. */
+    bool is_ready_impl() const {
+        return ready_;
     }
 
 private:
@@ -99,8 +138,8 @@ private:
             auto local_options = options;
             local_options["length"] = std::to_string(segment_len);
 
-            auto resp = markov_source_->process(seed, local_options, context);
-            return resp.output;
+            auto result = markov_source_->process(seed, local_options, context);
+            return result.has_value() ? result->output : "";
         }
 
         // --- Fractal Branching (Binary Split) ---
@@ -111,7 +150,7 @@ private:
         // Extract context for Branch B
         // We use the last N words of Branch A to seed Branch B to maintain flow.
         // If Branch A is empty or short, we fall back to the original seed.
-        int context_words = options.count("n_gram") ? std::stoi(options.at("n_gram")) : 2;
+        int context_words = options.contains("n_gram") ? std::stoi(options.at("n_gram")) : 2;
         std::string bridge_seed = extract_context(branch_a, context_words);
 
         if (bridge_seed.empty()) {

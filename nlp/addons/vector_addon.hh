@@ -40,21 +40,28 @@ private:
 public:
     VectorAddon() = default;
 
+    /** @brief Rule of 5: Explicitly declared for modern C++ standards. */
+    virtual ~VectorAddon() = default;
+    VectorAddon(const VectorAddon&) = default;
+    VectorAddon& operator=(const VectorAddon&) = default;
+    VectorAddon(VectorAddon&&) noexcept = default;
+    VectorAddon& operator=(VectorAddon&&) noexcept = default;
+
     // --- NLPAddon Implementation ---
 
     const std::string& name_impl() const { return name_; }
     const std::string& version_impl() const { return version_; }
 
     bool init_impl() { return true; }
-    bool is_ready() const override { return ready_; }
+    bool is_ready_impl() const { return ready_; }
 
     /**
      * @brief Streaming implementation for vector operations (currently returns full result as single chunk).
      */
     void process_stream_impl(const std::string& input,
-                            std::function<void(const std::string& chunk, bool is_final)> callback,
-                            const std::unordered_map<std::string, std::string>& options,
-                            std::shared_ptr<AddonContext> context = nullptr) {
+                             std::function<void(const std::string& chunk, bool is_final)> callback,
+                             const std::unordered_map<std::string, std::string>& options,
+                             std::shared_ptr<AddonContext> context = nullptr) {
         AddonResponse resp = process_impl(input, options, context);
         callback(resp.output, true);
     }
@@ -64,22 +71,21 @@ public:
      * Methods: "similarity", "clustering", "outlier_detection", "nearest_neighbors"
      */
     AddonResponse process_impl(const std::string& input,
-                              const std::unordered_map<std::string, std::string>& options,
-                              std::shared_ptr<AddonContext> context = nullptr) {
+                               const std::unordered_map<std::string, std::string>& options,
+                               std::shared_ptr<AddonContext> context = nullptr) {
         if (!ready_) return {"", false, "Vector model not loaded", {}};
 
-        std::string method = options.count("method") ? options.at("method") : "similarity";
+        std::string method = options.contains("method") ? options.at("method") : "similarity";
         json result;
 
         try {
             if (method == "similarity") {
                 // Compare input text to a target in options
-                std::string target = options.count("target") ? options.at("target") : "";
+                std::string target = options.contains("target") ? options.at("target") : "";
                 float score = calculate_similarity(input, target);
                 result["cosine_similarity"] = score;
-            }
-            else if (method == "nearest_neighbors") {
-                int k = options.count("k") ? std::stoi(options.at("k")) : 5;
+            } else if (method == "nearest_neighbors") {
+                int k = options.contains("k") ? std::stoi(options.at("k")) : 5;
                 auto neighbors = find_nearest_neighbors(input, k);
                 result["neighbors"] = neighbors;
             }
@@ -120,7 +126,8 @@ public:
     /**
      * @brief Finds the K most semantically similar words to the input.
      */
-    std::vector<std::pair<std::string, float>> find_nearest_neighbors(const std::string& word, int k) {
+    std::vector<std::pair<std::string, float>> find_nearest_neighbors(const std::string& word,
+                                                                     int k) {
         auto it = embeddings_.find(word);
         if (it == embeddings_.end()) return {};
 

@@ -13,10 +13,12 @@ interface ToolkitDropdownProps {
  * Includes domain-dependent presets and custom preset management.
  */
 const ToolkitDropdown: React.FC<ToolkitDropdownProps> = ({ onAction }) => {
-  const [customPresets, setCustomPresets] = useState<Record<string, any>>(() => {
-    const saved = localStorage.getItem("nlp-custom-presets");
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [customPresets, setCustomPresets] = useState<Record<string, any>>(
+    () => {
+      const saved = localStorage.getItem("nlp-custom-presets");
+      return saved ? JSON.parse(saved) : {};
+    },
+  );
 
   const [params, setParams] = useState({
     minLength: 3,
@@ -33,12 +35,14 @@ const ToolkitDropdown: React.FC<ToolkitDropdownProps> = ({ onAction }) => {
     const builtIn: Record<string, any> = {
       general: {
         minLength: 3,
-        skipWords: "the,a,an,and,or,but,is,are,was,were,of,it,this,that,to,for,with,in,on,at",
+        skipWords:
+          "the,a,an,and,or,but,is,are,was,were,of,it,this,that,to,for,with,in,on,at",
         ignorePunct: true,
       },
       academic: {
         minLength: 5,
-        skipWords: "however,therefore,furthermore,consequently,notably,suggests,indicates,analysis",
+        skipWords:
+          "however,therefore,furthermore,consequently,notably,suggests,indicates,analysis",
         ignorePunct: true,
       },
       creative: {
@@ -48,7 +52,8 @@ const ToolkitDropdown: React.FC<ToolkitDropdownProps> = ({ onAction }) => {
       },
       code: {
         minLength: 2,
-        skipWords: "const,let,var,function,return,import,export,from,class,public,private",
+        skipWords:
+          "const,let,var,function,return,import,export,from,class,public,private",
         ignorePunct: false,
       },
       strict: {
@@ -67,7 +72,10 @@ const ToolkitDropdown: React.FC<ToolkitDropdownProps> = ({ onAction }) => {
   const saveCurrentAsPreset = () => {
     const name = prompt("Enter a name for this domain preset:");
     if (!name) return;
-    const newPresets = { ...customPresets, [name.toLowerCase()]: { ...params } };
+    const newPresets = {
+      ...customPresets,
+      [name.toLowerCase()]: { ...params },
+    };
     setCustomPresets(newPresets);
     localStorage.setItem("nlp-custom-presets", JSON.stringify(newPresets));
   };
@@ -88,10 +96,22 @@ const ToolkitDropdown: React.FC<ToolkitDropdownProps> = ({ onAction }) => {
   });
 
   return (
-    <Dropdown label="Toolkit" subLabel="Deduplicator" icon="settings" variant="warning" width="w-80">
-      <div className="px-4 pb-2 mb-2 border-b" style={{ borderBottomColor: "var(--theme-border)" }}>
+    <Dropdown
+      label="Toolkit"
+      subLabel="Deduplicator"
+      icon="settings"
+      variant="warning"
+      width="w-80"
+    >
+      <div
+        className="px-4 pb-2 mb-2 border-b"
+        style={{ borderBottomColor: "var(--theme-border)" }}
+      >
         <div className="flex flex-col gap-2">
-          <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: "var(--theme-text-muted)" }}>
+          <span
+            className="text-[9px] font-black uppercase tracking-widest"
+            style={{ color: "var(--theme-text-muted)" }}
+          >
             Domain Presets
           </span>
           <div className="flex flex-wrap gap-1">
@@ -139,25 +159,46 @@ const ToolkitDropdown: React.FC<ToolkitDropdownProps> = ({ onAction }) => {
             className="flex flex-col items-center justify-center p-3 rounded-xl border border-transparent bg-indigo-500/5 hover:bg-indigo-500/10 transition-all group"
             style={{ color: "var(--theme-primary)" }}
           >
-            <Icon name="search" size="sm" className="mb-1 group-hover:scale-110 transition-transform" />
-            <span className="text-[8px] font-black uppercase tracking-widest">Find Dups</span>
+            <Icon
+              name="search"
+              size="sm"
+              className="mb-1 group-hover:scale-110 transition-transform"
+            />
+            <span className="text-[8px] font-black uppercase tracking-widest">
+              Find Dups
+            </span>
           </button>
           <button
             onClick={() => onAction("deduplicator", getDedupeOptions("remove"))}
             className="flex flex-col items-center justify-center p-3 rounded-xl border border-transparent bg-rose-500/5 hover:bg-rose-500/10 transition-all group"
             style={{ color: "var(--theme-danger)" }}
           >
-            <Icon name="trash" size="sm" className="mb-1 group-hover:scale-110 transition-transform" />
-            <span className="text-[8px] font-black uppercase tracking-widest">Delete Dups</span>
+            <Icon
+              name="trash"
+              size="sm"
+              className="mb-1 group-hover:scale-110 transition-transform"
+            />
+            <span className="text-[8px] font-black uppercase tracking-widest">
+              Delete Dups
+            </span>
           </button>
         </div>
 
-        <div className="h-px mb-2" style={{ backgroundColor: "var(--theme-border)" }} />
+        <div
+          className="h-px mb-2"
+          style={{ backgroundColor: "var(--theme-border)" }}
+        />
 
         {/* Parameter Settings */}
-        <div className="p-3 rounded-xl space-y-4" style={{ backgroundColor: "var(--theme-bg)" }}>
+        <div
+          className="p-3 rounded-xl space-y-4"
+          style={{ backgroundColor: "var(--theme-bg)" }}
+        >
           <div className="space-y-1">
-            <div className="flex justify-between text-[9px] font-bold" style={{ color: "var(--theme-text-muted)" }}>
+            <div
+              className="flex justify-between text-[9px] font-bold"
+              style={{ color: "var(--theme-text-muted)" }}
+            >
               <span>Min Segment Length</span>
               <span>{params.minLength}</span>
             </div>
@@ -166,30 +207,50 @@ const ToolkitDropdown: React.FC<ToolkitDropdownProps> = ({ onAction }) => {
               min="1"
               max="20"
               value={params.minLength}
-              onChange={(e) => setParams({ ...params, minLength: parseInt(e.target.value) })}
+              onChange={(e) =>
+                setParams({ ...params, minLength: parseInt(e.target.value) })
+              }
               className="w-full h-1 rounded-lg appearance-none cursor-pointer accent-amber-500"
               style={{ backgroundColor: "var(--theme-border)" }}
             />
           </div>
 
           <div className="space-y-1">
-            <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: "var(--theme-text-muted)" }}>
+            <span
+              className="text-[9px] font-black uppercase tracking-widest"
+              style={{ color: "var(--theme-text-muted)" }}
+            >
               Skip Words / Domain Tokens
             </span>
             <input
               type="text"
               value={params.skipWords}
-              onChange={(e) => setParams({ ...params, skipWords: e.target.value })}
+              onChange={(e) =>
+                setParams({ ...params, skipWords: e.target.value })
+              }
               placeholder="word1,word2..."
               className="w-full px-2 py-1.5 rounded-lg text-[10px] font-bold bg-transparent border focus:outline-none focus:border-amber-500"
-              style={{ color: "var(--theme-text)", borderColor: "var(--theme-border)" }}
+              style={{
+                color: "var(--theme-text)",
+                borderColor: "var(--theme-border)",
+              }}
             />
           </div>
 
           <div className="flex flex-col gap-3">
-            <Toggle label="Ignore Quotes" checked={params.ignoreQuotes} onChange={() => handleToggleParam("ignoreQuotes")} size="sm" />
+            <Toggle
+              label="Ignore Quotes"
+              checked={params.ignoreQuotes}
+              onChange={() => handleToggleParam("ignoreQuotes")}
+              size="sm"
+            />
 
-            <Toggle label="Ignore Punctuation" checked={params.ignorePunct} onChange={() => handleToggleParam("ignorePunct")} size="sm" />
+            <Toggle
+              label="Ignore Punctuation"
+              checked={params.ignorePunct}
+              onChange={() => handleToggleParam("ignorePunct")}
+              size="sm"
+            />
           </div>
         </div>
       </div>

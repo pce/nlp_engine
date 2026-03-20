@@ -78,8 +78,11 @@ A Postprocess-Step with Neural LM-based rewriting can restrucure, add entities, 
 
 ## Roadmap
 
+- RAG Search with embedded vectors, Index or Vector Memory
+  - current draft: RAG (Retrieval Augmented Generation) requires an Embedding adapter (TransformerAdapter) to create the vector embeddings (and the Response are just SearchResultJunks), and an LM can with given Context can structure releveant Results,
+  - - Query embeddings vector (\_cosine_similarities, sort by top-k indices)
+  - - Response with Context and generation-based approaches requires an LM Adapter
 - Detect Repetition (Some LM Models tend to repetition) / simple remove, better Context aware Remove
-- Fractal TextGen
 
 ## Key Features / Hauptmerkmale
 
@@ -168,4 +171,12 @@ cd build && ctest --output-on-failure
 
 # 5. Generate Documentation (optional)
 cmake --build build --target docs
+```
+
+## Tests
+
+Catch2 Unit-Test Suite
+
+```
+./dev.sh clean --test --debug
 ```

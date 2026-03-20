@@ -8,6 +8,7 @@
 #   ./dev.sh --python     # Build with Python bindings (pybind11)
 #   ./dev.sh --fastapi    # Full build (Python + Client) and run FastAPI
 #   ./dev.sh --test       # Run C++ tests after build
+#   ./dev.sh --asan       # Build with Address/UB Sanitizers (Debug)
 #   ./dev.sh --release    # Release build type (default)
 #   ./dev.sh --debug      # Debug build type
 #   ./dev.sh --client     # Build the React frontend client
@@ -34,6 +35,9 @@ RUN_TESTS=0
 BUILD_CLIENT=0
 RUN_FASTAPI=0
 PROD_MODE=0
+DO_FORMAT=0
+USE_ASAN=0
+USE_LLVM22=0
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 for arg in "$@"; do
@@ -43,6 +47,9 @@ for arg in "$@"; do
     --fastapi)    BUILD_PYTHON=1; BUILD_CLIENT=1; RUN_FASTAPI=1; RUN_TESTS=1 ;;
     --prod)       PROD_MODE=1 ;;
     --test)       RUN_TESTS=1 ;;
+    --asan)       USE_ASAN=1; BUILD_TYPE="Debug" ;;
+    --llvm22)     USE_LLVM22=1 ;;
+    --format)     DO_FORMAT=1 ;;
     --client)     BUILD_CLIENT=1 ;;
     --release)    BUILD_TYPE="Release" ;;
     --debug)      BUILD_TYPE="Debug" ;;
@@ -56,6 +63,7 @@ done
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 step "Prerequisites"
 command -v cmake >/dev/null || die "cmake not found — install from https://cmake.org"
+[[ "$DO_FORMAT" -eq 1 ]] && { command -v clang-format >/dev/null || warn "clang-format not found — C++ formatting will be skipped. Install via 'brew install clang-format' or your package manager."; }
 [[ "$BUILD_CLIENT" -eq 1 ]] && { command -v bun >/dev/null || die "bun not found (required for --client)"; }
 [[ "$RUN_FASTAPI" -eq 1 ]] && { command -v uv >/dev/null || die "uv not found (required for --fastapi)"; }
 success "System ready for ${BUILD_TYPE} build"
@@ -65,6 +73,33 @@ if [[ "$CLEAN" -eq 1 ]]; then
   step "Cleaning"
   rm -rf "$ROOT/build"
   success "build/ directory cleared"
+fi
+
+# ── Step 0: Formatting ────────────────────────────────────────────────────────
+if [[ "$DO_FORMAT" -eq 1 ]]; then
+  step "Formatting Code"
+
+  # 1. C++ Formatting (cpp, hh only)
+  if command -v clang-format >/dev/null; then
+    info "Formatting C++..."
+    # Exclude common dependency directories to prevent formatting third-party code
+    find "$ROOT" \( -path "*/.venv" -o -path "*/venv" -o -path "*/build" -o -path "*/node_modules" -o -path "*/_deps" \) -prune \
+      -o \( -name "*.cpp" -o -name "*.hh" \) -print0 | xargs -0 clang-format -i
+  else
+    warn "clang-format not found; skipping C++ formatting."
+  fi
+
+  # 2. JS/TS Formatting (Excluding JSON and Markdown)
+  if command -v bun >/dev/null; then
+    info "Formatting JS/TS files..."
+    # Prettier automatically respects .gitignore and .prettierignore
+    # Restricted to js, ts, tsx and explicitly excluding json/md
+    bun x prettier --write "**/*.{js,ts,tsx}" --no-error-on-unmatched-pattern || true
+  else
+    warn "bun not found; skipping JS/TS formatting."
+  fi
+
+  success "Formatting complete."
 fi
 
 # ── Step 1: Frontend (Optional) ───────────────────────────────────────────────
@@ -116,25 +151,78 @@ else
   CMAKE_ARGS+=("-DBUILD_PYTHON_BINDINGS=OFF")
 fi
 
-# Ensure build directory exists
-mkdir -p "$ROOT/build"
-cd "$ROOT/build"
-
-info "Configuring..."
-cmake .. "${CMAKE_ARGS[@]}"
-
-NCPU=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
-info "Compiling with ${NCPU} cores..."
-cmake --build . --parallel "$NCPU"
+# Use CMake Presets for local development if available, otherwise fallback to standard args
+# This allows local LLVM-22 toolchain via CMakePresets.json while CI uses standard env.
+if [[ -f "$ROOT/CMakePresets.json" && -z "${GITHUB_ACTIONS:-}" ]]; then
+    if [[ "$USE_ASAN" -eq 1 ]]; then
+        if [[ "$USE_LLVM22" -eq 1 ]]; then
+            info "Using CMake Preset: llvm22-asan"
+            cmake --preset llvm22-asan "${CMAKE_ARGS[@]}"
+            info "Compiling with CMake Preset (LLVM 22 ASan)..."
+            cmake --build --preset build-llvm22-asan
+        else
+            info "Using CMake Preset: asan-system"
+            cmake --preset asan-system "${CMAKE_ARGS[@]}"
+            info "Compiling with CMake Preset (System ASan)..."
+            cmake --build --preset build-asan-system
+        fi
+    elif [[ "$USE_LLVM22" -eq 1 ]]; then
+        info "Using CMake Preset: llvm22-custom"
+        cmake --preset llvm22-custom "${CMAKE_ARGS[@]}"
+        info "Compiling with CMake Preset (LLVM 22)..."
+        cmake --build --preset build-llvm22
+    else
+        info "Using CMake Preset: default"
+        cmake --preset default "${CMAKE_ARGS[@]}"
+        info "Compiling with CMake Preset (Default)..."
+        cmake --build --preset build-default
+    fi
+else
+    info "No preset found or CI environment detected. Using standard configuration."
+    mkdir -p "$ROOT/build"
+    cd "$ROOT/build"
+    cmake .. "${CMAKE_ARGS[@]}"
+    NCPU=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+    info "Compiling with ${NCPU} cores..."
+    cmake --build . --parallel "$NCPU"
+fi
 
 # ── Step 3: Tests ─────────────────────────────────────────────────────────────
 if [[ "$RUN_TESTS" -eq 1 ]]; then
   step "Testing"
-  if [[ -f "./nlp_tests" ]]; then
-    ./nlp_tests
-    success "C++ Tests passed"
+  TEST_FAILED=0
+
+  # Determine test directory based on build method
+  if [[ -f "$ROOT/CMakePresets.json" && -z "${GITHUB_ACTIONS:-}" ]]; then
+      # Using presets, the binary location depends on the preset configuration.
+      # Usually it's in build/llvm22 or similar if specified, but our preset
+      # might just put them in a standard place. Let's look in build/
+      TEST_DIR="$ROOT/build"
   else
-    warn "Test binary not found; ensure BUILD_TESTING=ON in CMake"
+      TEST_DIR="$ROOT/build"
+  fi
+
+  # Execute all Catch2 test binaries
+  for bin_name in "nlp_tests" "nlp_tests_async" "nlp_tests_markov"; do
+    # Find the binary recursively in the build directory
+    test_bin=$(find "$TEST_DIR" -type f -name "$bin_name" | head -n 1)
+
+    if [[ -n "$test_bin" && -x "$test_bin" ]]; then
+      info "Running $(basename "$test_bin")..."
+      if ! "$test_bin"; then
+        warn "$(basename "$test_bin") failed"
+        TEST_FAILED=1
+      fi
+    else
+      warn "Test binary $bin_name not found or not executable in $TEST_DIR"
+      TEST_FAILED=1
+    fi
+  done
+
+  if [[ "$TEST_FAILED" -eq 0 ]]; then
+    success "All C++ Tests passed"
+  else
+    die "Some tests failed"
   fi
 fi
 
