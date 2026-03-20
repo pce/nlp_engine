@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import DocumentPanel from "./DocumentPanel";
@@ -12,7 +12,9 @@ import Icon from "./Icon";
 const Dashboard: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [documentContent, setDocumentContent] = useState("");
+  const [outputContent, setOutputContent] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const analysisResultsRef = useRef<((results: string) => void) | null>(null);
 
   // active navigation styling (TODO expand with a router)
   const activeLink = (path: string) => (window.location.pathname === path ? "text-indigo-600 font-bold" : "text-slate-500 hover:text-indigo-500");
@@ -39,7 +41,14 @@ const Dashboard: React.FC = () => {
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
           active={activeLink}
-          onContentChange={setDocumentContent}
+          onContentChange={(content, target) => {
+            if (target === "output") {
+              setOutputContent(content);
+            } else {
+              setDocumentContent(content);
+            }
+          }}
+          onAnalysisResults={(results) => analysisResultsRef.current?.(results)}
           isGenerating={isGenerating}
           setIsGenerating={setIsGenerating}
         />
@@ -72,7 +81,14 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Central Editor/Analysis Workspace */}
-            <DocumentPanel content={documentContent} onContentChange={setDocumentContent} isGenerating={isGenerating} />
+            <DocumentPanel
+              content={documentContent}
+              outputContent={outputContent}
+              onContentChange={setDocumentContent}
+              onOutputChange={setOutputContent}
+              onAnalysisResultsRef={analysisResultsRef}
+              isGenerating={isGenerating}
+            />
 
             {/* TODO Quick Stats */}
           </div>

@@ -263,8 +263,12 @@ class NLPService {
           plugin: request.model || "markov_generator",
           session_id: request.session_id,
           options: {
-            length: request.length || 100,
+            length: request.length || 150,
             temperature: request.temperature || 1.0,
+            top_p: request.top_p || 0.9,
+            n_gram: request.n_gram || 2,
+            use_hybrid: request.use_hybrid ? "true" : "false",
+            ...request.options,
           },
         }),
       });
@@ -277,6 +281,29 @@ class NLPService {
       return await response.json();
     } catch (error) {
       console.error("NLP Generation Error:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Trains a new Markov model from the current editor content.
+   */
+  async trainModel(request: { category: string; text: string; ngram_size: number }): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseUrl}/train-model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || "Training failed");
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("NLP Training Error:", error);
       throw error;
     }
   }

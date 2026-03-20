@@ -6,19 +6,32 @@ import AnalysisDashboard from "./analysis/AnalysisDashboard";
 
 interface DocumentPanelProps {
   content: string;
+  outputContent?: string;
   onContentChange?: (content: string) => void;
+  onOutputChange?: (content: string) => void;
+  onAnalysisResultsRef?: React.MutableRefObject<((results: string) => void) | null>;
   isGenerating?: boolean;
 }
 
-const DocumentPanel = ({ content, onContentChange, isGenerating }: DocumentPanelProps) => {
+const DocumentPanel = ({
+  content,
+  outputContent: externalOutputContent,
+  onContentChange,
+  onOutputChange,
+  onAnalysisResultsRef,
+  isGenerating,
+}: DocumentPanelProps) => {
   // Initialize document state using the model helper
   const [doc, setDoc] = useState<DocumentState>(() => DocumentModel.createInitialState("Analysis Workspace", content));
   const [selectedText, setSelectedText] = useState<string>("");
 
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [results, setResults] = useState<string>("");
-  const [outputContent, setOutputContent] = useState<string>("");
+  const [internalOutputContent, setInternalOutputContent] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"editor" | "output" | "results">("editor");
+
+  const outputContent = externalOutputContent !== undefined ? externalOutputContent : internalOutputContent;
+  const setOutputContent = onOutputChange || setInternalOutputContent;
   const streamCleanupRef = useRef<(() => void) | null>(null);
 
   // Derived stats using the model logic
@@ -118,6 +131,20 @@ const DocumentPanel = ({ content, onContentChange, isGenerating }: DocumentPanel
     }
   };
 
+  // Expose setResults to parent via ref
+  useEffect(() => {
+    if (onAnalysisResultsRef) {
+      onAnalysisResultsRef.current = (newResults: string) => {
+        setActiveTab("results");
+        setResults(newResults);
+        setIsProcessing(false);
+      };
+    }
+    return () => {
+      if (onAnalysisResultsRef) onAnalysisResultsRef.current = null;
+    };
+  }, [onAnalysisResultsRef]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -132,12 +159,8 @@ const DocumentPanel = ({ content, onContentChange, isGenerating }: DocumentPanel
     if (isGenerating) {
       // Switch to Output tab when generation starts
       setActiveTab("output");
-      setOutputContent(content);
-    } else if (content !== "" && activeTab === "output") {
-      // Keep syncing output content during and after generation
-      setOutputContent(content);
     }
-  }, [content, isGenerating]);
+  }, [isGenerating]);
 
   // Sync Input Source if content changed while on editor tab (initial load or manual sync)
   useEffect(() => {

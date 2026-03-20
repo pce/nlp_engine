@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 # --- Native NLP Engine Integration ---
 try:
-    from nlp_engine import AsyncNLPEngine
+    from nlp_engine import AsyncNLPEngine, FractalAddon, DeduplicationAddon
 except ImportError as e:
     print(f"DEBUG: sys.path is {sys.path}")
     print(f"DEBUG: PYTHONPATH is {os.environ.get('PYTHONPATH')}")
@@ -78,6 +78,18 @@ def refresh_markov_models():
                 app.state.available_models.append(model_name)
                 logger.info(f"Registered Markov model: {model_name}")
 
+    # Re-sync Fractal dependencies to ensure it picks up the newly loaded Markov sources
+    try:
+        addons = engine.get_all_addons()
+        if "fractal_generator" in addons:
+            fractal = addons["fractal_generator"]
+            # Re-run registration logic to link the primary markov_generator
+            # If a specific model is selected in UI, it should be the source
+            engine.register_fractal_addon(fractal)
+            logger.info("Fractal dependencies re-synced after model refresh.")
+    except Exception as e:
+        logger.warning(f"Failed to re-sync fractal dependencies: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     try:
@@ -86,7 +98,24 @@ async def startup_event():
             logger.error(f"Failed to load model resources from: {data_path}")
         engine.initialize()
         logger.info(f"Native NLP Engine initialized with resources from {data_path}")
+
+        # Register Addons BEFORE refreshing models so dependencies can be linked
+        try:
+            fractal = FractalAddon()
+            engine.register_fractal_addon(fractal)
+            logger.info("Fractal Text Generator addon registered.")
+        except Exception as fe:
+            logger.warning(f"Could not initialize Fractal addon: {fe}")
+
+        try:
+            dedupe = DeduplicationAddon()
+            engine.register_dedupe_addon(dedupe)
+            logger.info("Deduplication addon registered.")
+        except Exception as de:
+            logger.warning(f"Could not initialize Deduplication addon: {de}")
+
         refresh_markov_models()
+
     except Exception as e:
         logger.error(f"Failed to initialize native engine: {e}")
 
@@ -132,8 +161,21 @@ async def generate_text(request: ProcessingRequest):
     try:
         # Map plugin to model name if provided
         method = request.plugin if (request.plugin and request.plugin != "default") else "markov_generator"
+
+        # If calling fractal_generator, ensure the source model is linked
+        if method == "fractal_generator":
+            # Default to generic_novel if no model specified
+            source_model = request.options.get("model") or "generic_novel"
+            addons = engine.get_all_addons()
+            if "fractal_generator" in addons:
+                fractal = addons["fractal_generator"]
+                # This call internally links the source model to the fractal engine
+                engine.register_fractal_addon(fractal, source_model)
+                logger.info(f"Linked Fractal engine to source model: {source_model}")
+
         if method == "markov_generator" and request.options.get("model"):
             method = request.options["model"]
+
         safe_options = {k: str(v) for k, v in request.options.items()}
         res = engine.process_sync(request.text, method, safe_options, request.session_id or "")
         try:
@@ -160,7 +202,7 @@ async def generate_text_stream(
 ):
     internal_task_id = f"gen_stream_{int(time.time() * 1000)}"
     active_tasks_tracker[internal_task_id] = {"type": "MarkovStream", "start": time.time()}
-    
+
     options = {
         "length": str(length),
         "top_p": str(top_p),

@@ -76,6 +76,11 @@ A Postprocess-Step with Neural LM-based rewriting can restrucure, add entities, 
 
 ---
 
+## Roadmap
+
+- Detect Repetition (Some LM Models tend to repetition) / simple remove, better Context aware Remove
+- Fractal TextGen
+
 ## Key Features / Hauptmerkmale
 
 | Feature               | Description                       | Beschreibung                         |
