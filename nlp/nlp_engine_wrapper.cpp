@@ -1,5 +1,7 @@
 #include "nlp_engine_async.hh"
 #include "addons/markov_addon.hh"
+#include "addons/fractal_addon.hh"
+#include "addons/dedupe_addon.hh"
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
@@ -54,6 +56,61 @@ public:
             // For now, we'll implement a name override in AsyncNLPEngine if needed,
             // or assume the addon instance is already configured.
         }
+        return engine_->add_addon(addon);
+    }
+
+    /**
+     * @brief Register a Fractal generator addon and link its dependencies.
+     */
+    bool register_fractal_addon(std::shared_ptr<FractalAddon> addon, const std::string& markov_name = "") {
+        if (!engine_ || !addon) return false;
+        sync_fractal_dependencies(addon, markov_name);
+        return engine_->add_addon(addon);
+    }
+
+    /**
+     * @brief Internal helper to sync fractal dependencies.
+     */
+    void sync_fractal_dependencies(std::shared_ptr<FractalAddon> fractal, const std::string& markov_name = "") {
+        if (!engine_ || !fractal) return;
+
+        auto addons = engine_->get_all_addons();
+
+        // Link Markov Source
+        std::string target = markov_name.empty() ? "markov_generator" : markov_name;
+        if (addons.count(target)) {
+            auto markov = std::dynamic_pointer_cast<MarkovAddon>(addons.at(target));
+            if (markov) fractal->set_markov_source(markov);
+        }
+
+        // Link Vector Engine
+        if (addons.count("vector_engine")) {
+            auto vec = std::dynamic_pointer_cast<VectorAddon>(addons.at("vector_engine"));
+            if (vec) fractal->set_vector_engine(vec);
+        }
+    }
+
+    /**
+     * @brief Returns a map of all addons to Python.
+     */
+    std::unordered_map<std::string, std::shared_ptr<INLPAddon>> get_all_addons() {
+        if (engine_) return engine_->get_all_addons();
+        return {};
+    }
+
+    /**
+     * @brief Register a Deduplication addon and link its dependencies.
+     */
+    bool register_dedupe_addon(std::shared_ptr<DeduplicationAddon> addon) {
+        if (!engine_ || !addon) return false;
+
+        // Link to Vector engine if available for semantic replacement
+        auto addons = engine_->get_all_addons();
+        if (addons.count("vector_engine")) {
+            auto vec = std::dynamic_pointer_cast<VectorAddon>(addons.at("vector_engine"));
+            if (vec) addon->set_vector_engine(vec);
+        }
+
         return engine_->add_addon(addon);
     }
 
@@ -150,6 +207,40 @@ PYBIND11_MODULE(nlp_engine, m) {
         .def_readwrite("history", &AddonContext::history);
 
     // --- Markov Addon Bindings ---
+    // --- Fractal Addon Bindings ---
+    py::class_<FractalAddon, std::shared_ptr<FractalAddon>>(m, "FractalAddon")
+        .def(py::init<>())
+        .def_property_readonly("name", &FractalAddon::name)
+        .def("is_ready", &FractalAddon::is_ready)
+        .def("process", [](FractalAddon& self, const std::string& input,
+                           const std::unordered_map<std::string, std::string>& options,
+                           std::shared_ptr<AddonContext> context) {
+            auto resp = self.process(input, options, context);
+            py::dict d;
+            d["output"] = resp.output;
+            d["success"] = resp.success;
+            return d;
+        }, py::arg("input"),
+           py::arg("options") = std::unordered_map<std::string, std::string>(),
+           py::arg("context") = nullptr);
+
+    // --- Deduplication Addon Bindings ---
+    py::class_<DeduplicationAddon, std::shared_ptr<DeduplicationAddon>>(m, "DeduplicationAddon")
+        .def(py::init<>())
+        .def_property_readonly("name", &DeduplicationAddon::name)
+        .def("is_ready", &DeduplicationAddon::is_ready)
+        .def("process", [](DeduplicationAddon& self, const std::string& input,
+                           const std::unordered_map<std::string, std::string>& options,
+                           std::shared_ptr<AddonContext> context) {
+            auto resp = self.process(input, options, context);
+            py::dict d;
+            d["output"] = resp.output;
+            d["success"] = resp.success;
+            return d;
+        }, py::arg("input"),
+           py::arg("options") = std::unordered_map<std::string, std::string>(),
+           py::arg("context") = nullptr);
+
     py::class_<MarkovAddon, std::shared_ptr<MarkovAddon>>(m, "MarkovAddon")
         .def(py::init<>())
         .def_property_readonly("name", &MarkovAddon::name)
@@ -185,6 +276,14 @@ PYBIND11_MODULE(nlp_engine, m) {
         .def("register_markov_addon", &PythonAsyncNLPEngine::register_markov_addon,
              py::arg("addon"), py::arg("name") = "",
              "Register a pre-configured MarkovAddon instance")
+        .def("register_fractal_addon", &PythonAsyncNLPEngine::register_fractal_addon,
+             py::arg("addon"), py::arg("markov_name") = "",
+             "Register a FractalAddon and link it to a Markov source")
+        .def("get_all_addons", &PythonAsyncNLPEngine::get_all_addons,
+             "Get a map of all registered addons")
+        .def("register_dedupe_addon", &PythonAsyncNLPEngine::register_dedupe_addon,
+             py::arg("addon"),
+             "Register a DeduplicationAddon")
         .def("load_markov_model", &PythonAsyncNLPEngine::load_markov_model,
              py::arg("model_path"), py::arg("name") = "",
              "Quick-load and register a Markov model from path")

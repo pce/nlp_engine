@@ -121,6 +121,15 @@ public:
      */
     bool has_addon(const std::string& name);
 
+    /**
+     * @brief Gets all registered addons.
+     * @return A map of addon names to their shared pointers.
+     */
+    std::unordered_map<std::string, std::shared_ptr<INLPAddon>> get_all_addons() {
+        std::lock_guard<std::mutex> lock(addons_mutex_);
+        return addons_;
+    }
+
     // --- Processing API ---
 
     std::string process_sync(

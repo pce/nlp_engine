@@ -1,3 +1,9 @@
+How can we add a new module addon to generate fractal texts?
+
+i would like it under Generate Text, Gen. Fractal Text and to background in the Frontend and in the engine as a separate addon that works close with markov because its an experimental variation.
+
+Because it can use the markov chain, a draft looked like that, a newer impulse was to use the vector similarity of words to create repetative patterns based on a fractal pattern.
+
 # NLPEngine - Lightweight NLP for ICALL
 
 A lightweight, high-performance C++23 library for multilingual Natural Language Processing, specifically designed for **Intelligent Computer-Assisted Language Learning (ICALL)**.
@@ -75,6 +81,11 @@ A Postprocess-Step with Neural LM-based rewriting can restrucure, add entities, 
 - `-r 5`: Repeat tests 5 times (useful for catching race conditions in the Async engine).
 
 ---
+
+## Roadmap
+
+- Detect Repetition (Some LM Models tend to repetition) / simple remove, better Context aware Remove
+- Fractal TextGen
 
 ## Key Features / Hauptmerkmale
 
