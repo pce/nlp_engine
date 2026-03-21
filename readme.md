@@ -4,6 +4,11 @@ A lightweight, high-performance C++23 library for multilingual Natural Language 
 
 _Eine leichtgewichtige C++23-Bibliothek für mehrsprachige Computerlinguistik, speziell entwickelt für intelligentes computergestütztes Sprachlernen._
 
+> “There is no lightweight way to do Japanese correctly without a dictionary.”
+
+- Japanese is not just splitting on spaces
+- - word boundaries are not whitespace-based, needs morphological segmentation
+
 ---
 
 ## Async Example // Experimental
@@ -76,13 +81,54 @@ A Postprocess-Step with Neural LM-based rewriting can restrucure, add entities, 
 
 ---
 
+### Unicode
+
+- Transcoding/Validation `simdutf`
+- Memory "Friendliness": `std::move` and `reserve()` to minimize re-allocations of the token strings.
+- Algorithm: Switched from "Tokenize -> Fold Each" to "Fold All -> Tokenize". This reduces the number of UTF-8/UTF-32 conversions from **O(Words)** to \*\*O(1)\*\*
+- ASCII Fast-Path: Character code points `< 128` now bypass the `simdutf` conversion overhead entirely during the string building phase
+- No `re` (Regex): Kept the tokenization strictly logic-based. Regex is powerful but usually 5-10x slower for simple splitting like this.
+
 ## Roadmap
 
-- RAG Search with embedded vectors, Index or Vector Memory
+- Unicode
+  - Iteration/Views `utf8cpp` Header-only, zero dependencies, very stable.
+  - Segmentation (CJK) `ICU` (ICU4C) Minimal, full normalization/casefolding/locale support needed?
+  - - Optional: a real morphological segmenter for Japanese like a MeCab addon for real Japanese tokenization dictionary-based; ICU break iteration as fallback
+- Add repetition detection to core NLP Engine
+- Add RAG as a separate optional addon
+- - RAG Search with embedded vectors, Index or Vector Memory
   - current draft: RAG (Retrieval Augmented Generation) requires an Embedding adapter (TransformerAdapter) to create the vector embeddings (and the Response are just SearchResultJunks), and an LM can with given Context can structure releveant Results,
   - - Query embeddings vector (\_cosine_similarities, sort by top-k indices)
   - - Response with Context and generation-based approaches requires an LM Adapter
-- Detect Repetition (Some LM Models tend to repetition) / simple remove, better Context aware Remove
+- Detect Repetition / simple remove, better Context aware Remove
+- Use adapters for embeddings, retrieval index, and persistence
+- Keep LM-based rewriting outside the core, as an optional postprocess layer
+
+### Core Features Roadmap
+
+- Sentence segmentation
+- Token normalization
+- lowercasing, punctuation cleanup, unicode normalization
+- Lemmatization or a stronger alternative to stemming
+- Phrase/chunk extraction
+- noun phrases, key chunks
+- Deduplication / repetition detection
+- Text similarity / near-duplicate detection
+- Document indexing/search
+- Summarization helpers
+- Question intent / query classification
+- Text classification
+  = Lightweight entity linking / terminology matching
+- Language-aware cleanup/post-processing
+
+ICALL-focused Roadmap:
+
+- grammar pattern detection
+- error-type classification
+- simple correction ranking
+- sentence complexity / structure analysis
+- feedback generation templates
 
 ## Key Features / Hauptmerkmale
 

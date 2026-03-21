@@ -4,6 +4,7 @@
  */
 
 #include "nlp_engine.hh"
+#include "unicode/unicode_utils.hh"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -125,7 +126,7 @@ LanguageProfile NLPEngine::detect_language(const std::string& text) {
     std::unordered_set<std::string> fr_stops(model_->get_stopwords("fr").begin(), model_->get_stopwords("fr").end());
 
     for (const auto& token : tokens) {
-        std::string lower_token = to_lower(token);
+        std::string lower_token = unicode::UnicodeUtils::fold_case(token);
         if (en_stops.count(lower_token)) scores["en"]++;
         if (de_stops.count(lower_token)) scores["de"]++;
         if (fr_stops.count(lower_token)) scores["fr"]++;
@@ -149,26 +150,92 @@ LanguageProfile NLPEngine::detect_language(const std::string& text) {
 }
 
 std::vector<std::string> NLPEngine::tokenize(const std::string& text) {
+    if (text.empty()) return {};
+
+    // 1. Fold the entire string ONCE (O(1) conversion instead of O(Words))
+    std::string folded = unicode::UnicodeUtils::fold_case(text);
     std::vector<std::string> tokens;
-    std::istringstream iss(text);
-    std::string word;
-    while (iss >> word) {
-        std::string clean = to_lower(word);
-        clean.erase(std::remove_if(clean.begin(), clean.end(), [](unsigned char c) { return std::ispunct(c); }), clean.end());
-        if (!clean.empty()) tokens.push_back(clean);
+
+    // 2. Use a fast-path scanner
+    unicode::UnicodeUtils::CodePointIterator it(folded);
+    std::string current_token;
+    current_token.reserve(16);
+
+    while (it.has_next()) {
+        char32_t cp = it.next();
+
+        // Optimized boundary check: ASCII fast-path + Unicode ranges
+        bool is_split = unicode::UnicodeUtils::is_whitespace(cp) ||
+                        (cp < 128 && std::ispunct(static_cast<int>(cp))) ||
+                        (cp >= 0x00A1 && cp <= 0x00BF) ||
+                        (cp >= 0x2000 && cp <= 0x206F) ||
+                        (cp >= 0x3000 && cp <= 0x303F);
+
+        if (is_split) {
+            if (!current_token.empty()) {
+                tokens.push_back(std::move(current_token));
+                current_token.clear();
+                current_token.reserve(16);
+            }
+            continue;
+        }
+
+        // Append UTF-8 bytes efficiently (ASCII fast-path)
+        if (cp < 0x80) {
+            current_token += static_cast<char>(cp);
+        } else {
+            char buf[4];
+            size_t len = simdutf::convert_utf32_to_utf8(&cp, 1, buf);
+            current_token.append(buf, len);
+        }
     }
+
+    if (!current_token.empty()) {
+        tokens.push_back(std::move(current_token));
+    }
+
     return tokens;
 }
 
 std::vector<std::string> NLPEngine::tokenize_with_case(const std::string& text) {
+    if (text.empty()) return {};
+
     std::vector<std::string> tokens;
-    std::istringstream iss(text);
-    std::string word;
-    while (iss >> word) {
-        std::string clean = word;
-        clean.erase(std::remove_if(clean.begin(), clean.end(), [](unsigned char c) { return std::ispunct(c); }), clean.end());
-        if (!clean.empty()) tokens.push_back(clean);
+    unicode::UnicodeUtils::CodePointIterator it(text);
+    std::string current_token;
+    current_token.reserve(16);
+
+    while (it.has_next()) {
+        char32_t cp = it.next();
+
+        bool is_split = unicode::UnicodeUtils::is_whitespace(cp) ||
+                        (cp < 128 && std::ispunct(static_cast<int>(cp))) ||
+                        (cp >= 0x00A1 && cp <= 0x00BF) ||
+                        (cp >= 0x2000 && cp <= 0x206F) ||
+                        (cp >= 0x3000 && cp <= 0x303F);
+
+        if (is_split) {
+            if (!current_token.empty()) {
+                tokens.push_back(std::move(current_token));
+                current_token.clear();
+                current_token.reserve(16);
+            }
+            continue;
+        }
+
+        if (cp < 0x80) {
+            current_token += static_cast<char>(cp);
+        } else {
+            char buf[4];
+            size_t len = simdutf::convert_utf32_to_utf8(&cp, 1, buf);
+            current_token.append(buf, len);
+        }
     }
+
+    if (!current_token.empty()) {
+        tokens.push_back(std::move(current_token));
+    }
+
     return tokens;
 }
 
@@ -229,15 +296,23 @@ std::vector<std::string> NLPEngine::remove_stopwords(const std::vector<std::stri
 }
 
 std::string NLPEngine::normalize(const std::string& text) {
-    std::string lower = to_lower(text);
+    std::string folded = unicode::UnicodeUtils::fold_case(text);
     std::string res;
-    res.reserve(lower.size());
+    res.reserve(folded.size());
 
-    for (unsigned char c : lower) {
-        if (std::ispunct(c)) {
+    unicode::UnicodeUtils::CodePointIterator it(folded);
+    while (it.has_next()) {
+        char32_t cp = it.next();
+        if (unicode::UnicodeUtils::is_whitespace(cp) ||
+            (cp >= 0x21 && cp <= 0x2F) || (cp >= 0x3A && cp <= 0x40) ||
+            (cp >= 0x5B && cp <= 0x60) || (cp >= 0x7B && cp <= 0x7E) ||
+            (cp >= 0x00A1 && cp <= 0x00BF) || (cp >= 0x2000 && cp <= 0x206F) ||
+            (cp >= 0x3000 && cp <= 0x303F)) {
             res += ' ';
         } else {
-            res += static_cast<char>(c);
+            char buf[4];
+            size_t len = simdutf::convert_utf32_to_utf8(&cp, 1, buf);
+            res.append(buf, len);
         }
     }
 
@@ -332,7 +407,7 @@ std::map<std::string, float> NLPEngine::calculate_tfidf(const std::string& text)
         float tf = (float)count / filtered.size();
         int df = 0;
         for (const auto& s : sentences) {
-            std::string ls = to_lower(s);
+            std::string ls = unicode::UnicodeUtils::fold_case(s);
             // Search for whole word to avoid partial matches
             size_t pos = ls.find(term);
             if (pos != std::string::npos) {
@@ -417,11 +492,11 @@ std::vector<std::pair<std::string, std::string>> NLPEngine::pos_tag(const std::v
     if (!model_) return tagged;
     const auto& stops = model_->get_stopwords(lang);
     std::unordered_set<std::string> stop_set;
-    for (const auto& s : stops) stop_set.insert(to_lower(s));
+    for (const auto& s : stops) stop_set.insert(unicode::UnicodeUtils::fold_case(s));
 
     for (size_t i = 0; i < tokens.size(); ++i) {
         const std::string& t = tokens[i];
-        std::string lower_t = to_lower(t);
+        std::string lower_t = unicode::UnicodeUtils::fold_case(t);
         std::string tag = "NN"; // Default to Noun
 
         // Check if it's a stopword/determiner
@@ -511,7 +586,7 @@ SentimentResult NLPEngine::analyze_sentiment(const std::string& text, const std:
 ToxicityResult NLPEngine::detect_toxicity(const std::string& text, const std::string& lang) {
     ToxicityResult res{false, 0.0f, {}, "none"};
     if (!model_) return res;
-    std::string lower = to_lower(text);
+    std::string lower = unicode::UnicodeUtils::fold_case(text);
     for (const auto& p : model_->get_toxic_patterns()) {
         if (lower.find(p) != std::string::npos) {
             res.is_toxic = true;
@@ -526,14 +601,23 @@ ToxicityResult NLPEngine::detect_toxicity(const std::string& text, const std::st
 // --- Internal Helpers ---
 
 std::string NLPEngine::to_lower(const std::string& str) {
-    std::string res = str;
-    std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::tolower(c); });
-    return res;
+    return unicode::UnicodeUtils::fold_case(str);
 }
 
 std::string NLPEngine::remove_punctuation(const std::string& str) {
-    std::string res = str;
-    res.erase(std::remove_if(res.begin(), res.end(), [](unsigned char c) { return std::ispunct(c); }), res.end());
+    std::string res;
+    unicode::UnicodeUtils::CodePointIterator it(str);
+    while (it.has_next()) {
+        char32_t cp = it.next();
+        if (!((cp >= 0x21 && cp <= 0x2F) || (cp >= 0x3A && cp <= 0x40) ||
+              (cp >= 0x5B && cp <= 0x60) || (cp >= 0x7B && cp <= 0x7E) ||
+              (cp >= 0x00A1 && cp <= 0x00BF) || (cp >= 0x2000 && cp <= 0x206F) ||
+              (cp >= 0x3000 && cp <= 0x303F))) {
+            char buf[4];
+            size_t len = simdutf::convert_utf32_to_utf8(&cp, 1, buf);
+            res.append(buf, len);
+        }
+    }
     return res;
 }
 

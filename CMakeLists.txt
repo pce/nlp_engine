@@ -50,6 +50,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+# simdutf (Fast Unicode Validation & Transcoding)
+FetchContent_Declare(
+    simdutf
+    URL https://github.com/simdutf/simdutf/archive/refs/tags/v5.6.4.tar.gz
+)
+FetchContent_MakeAvailable(simdutf)
+
 # -----------------------------------------------------------------------------
 # Options
 # -----------------------------------------------------------------------------
@@ -83,10 +90,13 @@ target_include_directories(nlp_engine PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>
 )
 
-# Link JSON
-# We use BUILD_INTERFACE to ensure that nlohmann_json is only required during the build,
-# preventing export errors since the dependency is managed via FetchContent.
-target_link_libraries(nlp_engine PUBLIC $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
+# Link JSON and simdutf
+# We use BUILD_INTERFACE to ensure that dependencies are only required during the build,
+# preventing export errors since the dependencies are managed via FetchContent.
+target_link_libraries(nlp_engine PUBLIC
+    $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
+    $<BUILD_INTERFACE:simdutf::simdutf>
+)
 
 # -----------------------------------------------------------------------------
 # Python Bindings (Optional)
@@ -178,6 +188,12 @@ if(BUILD_TESTING)
     target_link_libraries(nlp_tests_markov PRIVATE nlp_engine Catch2::Catch2WithMain)
     add_dependencies(nlp_tests_markov prepare_data)
     add_test(NAME nlp_engine_markov_test COMMAND nlp_tests_markov)
+
+    # Unicode & Multilingual Tests (Catch2)
+    add_executable(nlp_tests_unicode tests/test_nlp_unicode.cpp)
+    target_link_libraries(nlp_tests_unicode PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_dependencies(nlp_tests_unicode prepare_data)
+    add_test(NAME nlp_engine_unicode_test COMMAND nlp_tests_unicode)
 endif()
 
 # -----------------------------------------------------------------------------
