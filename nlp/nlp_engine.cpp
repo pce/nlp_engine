@@ -5,6 +5,7 @@
 
 #include "nlp_engine.hh"
 #include "unicode/unicode_utils.hh"
+#include "addons/graph_addon.hh"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -546,13 +547,69 @@ std::string NLPEngine::stem(const std::string& word, const std::string& lang) {
 std::vector<Entity> NLPEngine::extract_entities(const std::string& text, const std::string& lang) {
     std::vector<Entity> entities;
     std::regex email_regex(R"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})");
+    std::regex capitalized_regex(R"(\b[A-Z][A-Za-z0-9&'-]*(?:\s+[A-Z][A-Za-z0-9&'-]*)*\b)");
+    std::regex biomedical_regex(R"(\b(?:DNA|RNA|mRNA|CRISPR|genomics|proteomics|transcriptomics|metabolomics|epigenetics|bioinformatics|biomarker|biomarkers|protein|proteins|genome|genomes|sequence|sequencing)\b)", std::regex_constants::icase);
     std::smatch match;
     std::string::const_iterator search_start(text.cbegin());
+
     while (std::regex_search(search_start, text.cend(), match, email_regex)) {
         entities.push_back({match[0], "email", (size_t)std::distance(text.cbegin(), match[0].first), 0.95f});
         search_start = match.suffix().first;
     }
+
+    search_start = text.cbegin();
+    while (std::regex_search(search_start, text.cend(), match, capitalized_regex)) {
+        std::string entity_text = match[0];
+        if (entity_text.size() >= 2) {
+            entities.push_back({entity_text, "entity", (size_t)std::distance(text.cbegin(), match[0].first), 0.75f});
+        }
+        search_start = match.suffix().first;
+    }
+
+    search_start = text.cbegin();
+    while (std::regex_search(search_start, text.cend(), match, biomedical_regex)) {
+        std::string entity_text = match[0];
+        if (entity_text.size() >= 2) {
+            entities.push_back({entity_text, "biomedical", (size_t)std::distance(text.cbegin(), match[0].first), 0.85f});
+        }
+        search_start = match.suffix().first;
+    }
+
     return entities;
+}
+
+void NLPEngine::build_knowledge_graph(const std::string& text, GraphAddon& graph, int window_size) {
+    auto entities = extract_entities(text);
+    if (entities.empty()) return;
+
+    std::sort(entities.begin(), entities.end(),
+              [](const Entity& a, const Entity& b) { return a.position < b.position; });
+
+    // Link entities that appear within a sliding proximity window.
+    // This intentionally creates denser, cluster-friendly links so graph
+    // community detection can group related entities more reliably.
+    const size_t max_distance = static_cast<size_t>(std::max(1, window_size)) * 60;
+    for (size_t i = 0; i < entities.size(); ++i) {
+        for (size_t j = i + 1; j < entities.size(); ++j) {
+            size_t distance = entities[j].position - entities[i].position;
+            if (distance > max_distance) {
+                break;
+            }
+
+            float weight = 1.0f;
+
+            // Prefer nearby entities and slightly strengthen direct co-occurrence.
+            if (distance < 120) {
+                weight += 0.5f;
+            }
+            if (entities[i].type == entities[j].type) {
+                weight += 0.25f;
+            }
+
+            graph.add_relationship(entities[i].text, entities[i].type,
+                                   entities[j].text, entities[j].type, weight);
+        }
+    }
 }
 
 ReadabilityMetrics NLPEngine::analyze_readability(const std::string& text) {

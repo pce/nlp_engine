@@ -16,6 +16,8 @@ using json = nlohmann::json;
 
 namespace pce::nlp {
 
+class GraphAddon;
+
 // ============ Data Structures ============
 
 struct Correction {
@@ -303,6 +305,14 @@ public:
    * @brief Extracts named entities (Names, Locations, Dates).
    */
   std::vector<Entity> extract_entities(const std::string& text, const std::string& lang = "en");
+
+  /**
+   * @brief Builds an Entity-Relationship Graph from the text.
+   * @param text Input source text.
+   * @param graph The GraphAddon instance to populate.
+   * @param window_size Number of tokens to look ahead for relationships.
+   */
+  void build_knowledge_graph(const std::string& text, GraphAddon& graph, int window_size = 10);
 
   /**
    * @brief Calculates readability scores like Flesch-Kincaid.

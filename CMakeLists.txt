@@ -82,6 +82,7 @@ add_library(nlp_engine
     nlp/nlp_engine.hh
     nlp/nlp_engine_async.cpp
     nlp/nlp_engine_async.hh
+    nlp/addons/graph_addon.hh
 )
 
 target_include_directories(nlp_engine PUBLIC
@@ -188,6 +189,12 @@ if(BUILD_TESTING)
     target_link_libraries(nlp_tests_markov PRIVATE nlp_engine Catch2::Catch2WithMain)
     add_dependencies(nlp_tests_markov prepare_data)
     add_test(NAME nlp_engine_markov_test COMMAND nlp_tests_markov)
+
+    # Graph Addon Tests (Catch2)
+    add_executable(nlp_tests_graph tests/test_nlp_graph.cpp)
+    target_link_libraries(nlp_tests_graph PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_dependencies(nlp_tests_graph prepare_data)
+    add_test(NAME nlp_engine_graph_test COMMAND nlp_tests_graph)
 
     # Unicode & Multilingual Tests (Catch2)
     add_executable(nlp_tests_unicode tests/test_nlp_unicode.cpp)

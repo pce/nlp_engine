@@ -203,7 +203,7 @@ if [[ "$RUN_TESTS" -eq 1 ]]; then
   fi
 
   # Execute all Catch2 test binaries
-  for bin_name in "nlp_tests" "nlp_tests_async" "nlp_tests_markov"; do
+  for bin_name in "nlp_tests" "nlp_tests_async" "nlp_tests_markov" "nlp_tests_graph"; do
     # Find the binary recursively in the build directory
     test_bin=$(find "$TEST_DIR" -type f -name "$bin_name" | head -n 1)
 

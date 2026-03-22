@@ -101,6 +101,7 @@ A Postprocess-Step with Neural LM-based rewriting can restrucure, add entities, 
   - current draft: RAG (Retrieval Augmented Generation) requires an Embedding adapter (TransformerAdapter) to create the vector embeddings (and the Response are just SearchResultJunks), and an LM can with given Context can structure releveant Results,
   - - Query embeddings vector (\_cosine_similarities, sort by top-k indices)
   - - Response with Context and generation-based approaches requires an LM Adapter
+  - - Hybrid search with exact keyword matching and vector search for semantic queries
 - Detect Repetition / simple remove, better Context aware Remove
 - Use adapters for embeddings, retrieval index, and persistence
 - Keep LM-based rewriting outside the core, as an optional postprocess layer
@@ -129,6 +130,13 @@ ICALL-focused Roadmap:
 - simple correction ranking
 - sentence complexity / structure analysis
 - feedback generation templates
+
+### GraphAddon Roadmap
+
+- Entity-relationship graph construction: Build a weighted graph of co-occurring entities from text.
+- Leiden-inspired community detection: Group related entities into communities using the current refinement loop.
+- Semantic summarization: Summarize large documents by aggregating results per detected community.
+- Performance: With **simdutf** and highly optimized C++23, this C++ implementation should be significantly faster than typical Python-based graph tooling.
 
 ## Key Features / Hauptmerkmale
 
