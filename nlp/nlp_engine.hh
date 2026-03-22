@@ -10,11 +10,20 @@
 #include <map>
 #include <memory>
 #include <unordered_map>
+#include <optional>
 #include <nlohmann/json.hpp>
+
+#include "addons/onnx/onnx_service.hh"
+#include "addons/onnx/inference_result.hh"
 
 using json = nlohmann::json;
 
 namespace pce::nlp {
+
+// Forward declaration — avoids pulling in the full ONNX addon header here.
+// The IOnnxService interface itself has zero ONNX Runtime dependency.
+// See: nlp/addons/onnx/onnx_service.hh
+using OnnxService = onnx::IOnnxService;
 
 class GraphAddon;
 
@@ -57,6 +66,38 @@ struct SummaryResult {
   float ratio;
   int original_length;
   int summary_length;
+};
+
+/**
+ * @struct SemanticMatch
+ * @brief A single result from semantic_search(): a document with its cosine
+ *        similarity score relative to the query embedding.
+ *
+ * Results are returned sorted by score descending so callers can simply
+ * take the first N entries.
+ */
+struct SemanticMatch {
+  std::string text;      ///< The matched document / sentence.
+  float       score;     ///< Cosine similarity to query — range [-1, 1].
+  size_t      index;     ///< Original index in the input collection.
+};
+
+/**
+ * @struct SchemaField
+ * @brief A single field descriptor used by extract_schema().
+ *
+ * Supply a JSON object whose keys are field names and whose values are
+ * plain-text descriptions of what to look for, e.g.:
+ *   { "company": "name of the hiring company",
+ *     "title":   "job title or role",
+ *     "salary":  "compensation or salary range" }
+ *
+ * The engine embeds each description and each candidate sentence, then
+ * picks the best-matching sentence per field.
+ */
+struct SchemaField {
+  std::string name;        ///< Field key, e.g. "company".
+  std::string description; ///< Natural-language hint for semantic matching.
 };
 
 struct LanguageProfile {
@@ -217,7 +258,53 @@ public:
    * @param model Pointer to a loaded NLPModel.
    */
   explicit NLPEngine(std::shared_ptr<NLPModel> model);
+
+  /**
+   * @brief Construct engine with a model and a pre-built ONNX service.
+   *
+   * Convenience overload so callers do not need a separate set_onnx_service()
+   * call when they already have an ONNXAddon ready.
+   *
+   * @param model  Loaded NLPModel.
+   * @param onnx   Loaded IOnnxService (e.g. an ONNXAddon with load_model() called).
+   */
+  NLPEngine(std::shared_ptr<NLPModel> model,
+            std::shared_ptr<OnnxService> onnx);
+
   ~NLPEngine() = default;
+
+  // ── ONNX Service ─────────────────────────────────────────────────────────
+
+  /**
+   * @brief Attach (or replace) the ONNX inference service.
+   *
+   * Thread-safety: call this before the engine is shared across threads.
+   * The engine stores a shared_ptr so the service lifetime is managed
+   * automatically.
+   *
+   * @param svc  A loaded IOnnxService, or nullptr to detach.
+   */
+  void set_onnx_service(std::shared_ptr<OnnxService> svc) noexcept {
+    onnx_ = std::move(svc);
+  }
+
+  /**
+   * @brief Returns true when an ONNX service is attached and loaded.
+   *
+   * Gate all semantic methods behind this check when building on top of
+   * NLPEngine — they return empty / fallback results when it is false.
+   */
+  [[nodiscard]] bool has_onnx() const noexcept {
+    return onnx_ != nullptr && onnx_->is_loaded();
+  }
+
+  /**
+   * @brief Direct access to the underlying service, e.g. for batch embedding.
+   * @return Pointer to the service, or nullptr if none is set.
+   */
+  [[nodiscard]] std::shared_ptr<OnnxService> onnx_service() const noexcept {
+    return onnx_;
+  }
 
   // --- Processing Methods ---
 
@@ -272,9 +359,19 @@ public:
 
   /**
    * @brief Generates an extractive summary of the text.
-   * @param ratio Compression ratio (0.1 to 1.0).
+   *
+   * When an ONNX service is attached the sentences are ranked by their
+   * cosine similarity to the centroid of the whole document (semantic
+   * extractive summarisation).  Without ONNX it falls back to the
+   * TF-IDF sentence scorer already in the engine.
+   *
+   * @param ratio  Fraction of sentences to keep (0.1 – 1.0).
+   * @param query  Optional focus query. When non-empty the summary is
+   *               biased toward sentences semantically close to the query
+   *               rather than the document centroid.
    */
-  SummaryResult summarize(const std::string& text, float ratio = 0.3);
+  SummaryResult summarize(const std::string& text, float ratio = 0.3,
+                          std::string_view query = {});
 
   /**
    * @brief Calculates term frequency - inverse document frequency scores.
@@ -305,6 +402,79 @@ public:
    * @brief Extracts named entities (Names, Locations, Dates).
    */
   std::vector<Entity> extract_entities(const std::string& text, const std::string& lang = "en");
+
+  // ── Semantic / ONNX-powered methods ──────────────────────────────────────
+  // All methods below require has_onnx() == true.  When called without an
+  // attached service they return empty containers or a zeroed-out result so
+  // callers never crash — they just get no semantic enrichment.
+
+  /**
+   * @brief Encode text to a dense L2-normalised embedding vector.
+   *
+   * Thin delegation to IOnnxService::embed(). Provided here so higher-level
+   * code only needs to hold an NLPEngine reference.
+   *
+   * @param text  Input sentence or passage (UTF-8).
+   * @return EmbeddingResult; check `.success` before consuming `.vector`.
+   */
+  [[nodiscard]] inference::EmbeddingResult
+  embed(std::string_view text);
+
+  /**
+   * @brief Rank a collection of documents by semantic similarity to a query.
+   *
+   * Each document is embedded once; the query is embedded once; results are
+   * sorted by cosine similarity descending.  The caller can take the top-k
+   * entries for retrieval-augmented tasks.
+   *
+   * @param query     Natural-language query string.
+   * @param documents Collection of texts to rank.
+   * @param top_k     Maximum number of results to return (0 = all).
+   * @return Vector of SemanticMatch, sorted best-first.
+   */
+  [[nodiscard]] std::vector<SemanticMatch>
+  semantic_search(std::string_view query,
+                  const std::vector<std::string>& documents,
+                  size_t top_k = 0);
+
+  /**
+   * @brief Extract structured data from free text using a JSON schema template.
+   *
+   * ### How it works
+   * 1. The `schema` JSON object is walked to collect field descriptors
+   *    (key = field name, value = plain-text hint about what to extract).
+   * 2. Each field description is embedded with ONNX.
+   * 3. The source text is split into sentences; each sentence is embedded.
+   * 4. The best-matching sentence per field is selected by cosine similarity
+   *    and returned in a JSON object that mirrors the schema shape.
+   *
+   * ### Example
+   * ```cpp
+   * json schema = {
+   *   {"company",     "name of the hiring company or employer"},
+   *   {"title",       "job title or position name"},
+   *   {"salary",      "compensation, pay, or salary range"},
+   *   {"location",    "city, country, or remote status"},
+   *   {"description", "role responsibilities or job duties"}
+   * };
+   * json result = engine.extract_schema(resume_text, schema);
+   * // result["company"] == "Acme Corp", result["title"] == "Senior Engineer", …
+   * ```
+   *
+   * @param text    Source document (UTF-8).
+   * @param schema  JSON object whose keys are field names and values are
+   *                plain-text descriptions used as semantic anchors.
+   * @param fields  Optional override list of SchemaField descriptors. When
+   *                non-empty this takes precedence over `schema`.
+   * @return JSON object with the same keys as `schema`, each mapped to the
+   *         best-matching extracted string.  A `"_scores"` sub-object with
+   *         per-field cosine similarities is always included so callers can
+   *         threshold low-confidence extractions.
+   */
+  [[nodiscard]] json
+  extract_schema(const std::string& text,
+                 const json& schema,
+                 const std::vector<SchemaField>& fields = {});
 
   /**
    * @brief Builds an Entity-Relationship Graph from the text.
@@ -341,7 +511,8 @@ public:
   json toxicity_to_json(const ToxicityResult& toxicity);
 
 private:
-  std::shared_ptr<NLPModel> model_;
+  std::shared_ptr<NLPModel>   model_;
+  std::shared_ptr<OnnxService> onnx_;   ///< Optional; null when ONNX is disabled.
 
   // Helper Methods
   std::string to_lower(const std::string& str);

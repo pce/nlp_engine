@@ -105,6 +105,8 @@ A Postprocess-Step with Neural LM-based rewriting can restrucure, add entities, 
 - Detect Repetition / simple remove, better Context aware Remove
 - Use adapters for embeddings, retrieval index, and persistence
 - Keep LM-based rewriting outside the core, as an optional postprocess layer
+- C++23: co routines and flat containers are not implemented by all compilers, polyfill to go multidimenional
+- UI: scikit learn to get :multidimenional_vector_graphs "better" access
 
 ### Core Features Roadmap
 
@@ -148,6 +150,39 @@ ICALL-focused Roadmap:
 | **Linguistics**       | Rule-based POS tagging & Stemming | Wortartenbestimmung & Stemming       |
 | **Ethics & Safety**   | Toxicity & Sentiment analysis     | Toxizitäts- & Stimmungsanalyse       |
 | **Terminology**       | Named Entity & Keyword extraction | Eigennamen- & Terminologieextraktion |
+
+### Vector Addon
+
+- Static word embeddings loaded from a JSON knowledge pack
+- Cosine similarity between words or averaged text vectors
+- K-nearest neighbours lookup
+- Centroid-based outlier detection — finds the word that doesn't belong
+- `inject_into_vector_addon()` — swap static vectors for live ONNX embeddings without changing any downstream code
+
+---
+
+## ONNX
+
+The rule-based engine knows what words mean statically. ONNX Runtime brings **context-aware vectors**: the same word gets a different representation depending on its neighbours, which unlocks similarity that survives paraphrase, entity aliases, and cross-lingual overlap — things no lookup table can express.
+
+**Starter model — `all-MiniLM-L6-v2`**
+
+| Property   | Value                        |
+| :--------- | :--------------------------- |
+| Dimensions | 384                          |
+| Size       | ~22 MB                       |
+| Licence    | Apache-2.0                   |
+| Pooling    | Mean pool + L2 normalisation |
+
+```bash
+./scripts/download_models.sh
+```
+
+---
+
+## Memorization vs weighted pattern completion
+
+A language model does not look words up by ID. Training encodes concepts as positions in a high-dimensional space - nearby points share meaning: not spelling. When the model sees "one and one", multiple attention layers resolve the context and the answer emerges from geometry: the query vector lands close to "2" because that region of the space was shaped by every arithmetic example in the training corpus. The model never stored the rule; it stored the manifold.
 
 ---
 

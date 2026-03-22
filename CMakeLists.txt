@@ -58,10 +58,11 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(simdutf)
 
 # -----------------------------------------------------------------------------
-# Options
+# Options Unit-Tests Suite
 # -----------------------------------------------------------------------------
 option(BUILD_TESTING "Build the test suite" ON)
 option(BUILD_PYTHON_BINDINGS "Build Python bindings using pybind11" OFF)
+option(DISABLE_ONNX "Disable the ONNX Runtime addon" OFF)
 
 # Catch2 (Modern C++23 Unit Testing & Memory Safety)
 if(BUILD_TESTING)
@@ -72,6 +73,40 @@ if(BUILD_TESTING)
     # Force static linkage for Catch2 to avoid runtime relocation segfaults on macOS with LLVM 22
     set(CATCH_BUILD_STATIC_LIBRARY ON CACHE BOOL "Build Catch2 as a static library" FORCE)
     FetchContent_MakeAvailable(Catch2)
+endif()
+
+# -----------------------------------------------------------------------------
+# ONNX Runtime (first-class — disable explicitly with -DDISABLE_ONNX=ON)
+# -----------------------------------------------------------------------------
+if(NOT DISABLE_ONNX)
+    # Detect platform to fetch the correct pre-built binary
+    if(APPLE)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+            set(ORT_URL  "https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-osx-arm64-1.17.3.tgz")
+            set(ORT_HASH "SHA256=236c49c9065213b0ec9dec874e3619da3d01cbc8b984bb24291247293454d0f4")
+        else()
+            set(ORT_URL  "https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-osx-x86_64-1.17.3.tgz")
+            set(ORT_HASH "SHA256=6292ad3d2e095b54b012a9fce7361f39fbac0b75fb6e9b1d9c320874515182e8")
+        endif()
+    elseif(WIN32)
+        set(ORT_URL  "https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-win-x64-1.17.3.zip")
+        set(ORT_HASH "SHA256=356a33d024f2709786bebd5d4ca06cd5392875da95daa0455aae72edc8993256")
+    else()
+        # Linux x64
+        set(ORT_URL  "https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-linux-x64-1.17.3.tgz")
+        set(ORT_HASH "SHA256=be6af07e5613d03c84a6b3e8f36fb6b2db888abc8cd2e7dc98ab6b7c87e74bde")
+    endif()
+
+    FetchContent_Declare(
+        onnxruntime
+        URL      ${ORT_URL}
+        URL_HASH ${ORT_HASH}
+    )
+    FetchContent_MakeAvailable(onnxruntime)
+
+    message(STATUS "ONNX Runtime: ENABLED (v1.17.3) — disable with -DDISABLE_ONNX=ON")
+else()
+    message(STATUS "ONNX Runtime: DISABLED (-DDISABLE_ONNX=ON)")
 endif()
 
 # -----------------------------------------------------------------------------
@@ -98,6 +133,40 @@ target_link_libraries(nlp_engine PUBLIC
     $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
     $<BUILD_INTERFACE:simdutf::simdutf>
 )
+
+# -----------------------------------------------------------------------------
+# ONNX Addon — compiled as part of nlp_engine when ONNX is present.
+# Addons (Summarize, Stylize, Graph, etc.) call the shared ONNX service
+# through nlp_engine; they do not link onnxruntime individually.
+# -----------------------------------------------------------------------------
+if(NOT DISABLE_ONNX)
+    # Resolve the shared library path from the fetched content directory
+    if(APPLE)
+        set(ORT_LIB "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.dylib")
+    elseif(WIN32)
+        set(ORT_LIB "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.lib")
+    else()
+        set(ORT_LIB "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.so")
+    endif()
+
+    # Add ONNX addon sources to the core engine
+    target_sources(nlp_engine PRIVATE
+        nlp/addons/onnx_addon.hh   # header-only; listed for IDE visibility
+    )
+
+    target_include_directories(nlp_engine PUBLIC
+        $<BUILD_INTERFACE:${onnxruntime_SOURCE_DIR}/include>
+    )
+
+    target_link_libraries(nlp_engine PUBLIC
+        $<BUILD_INTERFACE:${ORT_LIB}>
+    )
+
+    # Expose NLP_WITH_ONNX so headers can gate ONNX-specific code
+    target_compile_definitions(nlp_engine PUBLIC NLP_WITH_ONNX)
+
+    message(STATUS "ONNX Addon:      linked into nlp_engine (NLP_WITH_ONNX defined)")
+endif()
 
 # -----------------------------------------------------------------------------
 # Python Bindings (Optional)
@@ -201,6 +270,28 @@ if(BUILD_TESTING)
     target_link_libraries(nlp_tests_unicode PRIVATE nlp_engine Catch2::Catch2WithMain)
     add_dependencies(nlp_tests_unicode prepare_data)
     add_test(NAME nlp_engine_unicode_test COMMAND nlp_tests_unicode)
+
+    # ONNX Tokenizer Tests — always built, no ONNX Runtime dependency
+    add_executable(nlp_tests_onnx_tokenizer tests/test_nlp_onnx_tokenizer.cpp)
+    target_link_libraries(nlp_tests_onnx_tokenizer PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_dependencies(nlp_tests_onnx_tokenizer prepare_data)
+    add_test(NAME nlp_engine_onnx_tokenizer_test COMMAND nlp_tests_onnx_tokenizer)
+
+    # ONNX Embed Tests — always compiled; internal #ifdef NLP_WITH_ONNX guards the
+    # addon-dependent sections, so EmbeddingResult / TagResult / InferenceResult
+    # math tests run in every build including -DDISABLE_ONNX=ON builds.
+    add_executable(nlp_tests_onnx_embed tests/test_nlp_onnx_embed.cpp)
+    target_link_libraries(nlp_tests_onnx_embed PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_dependencies(nlp_tests_onnx_embed prepare_data)
+    add_test(NAME nlp_engine_onnx_embed_test COMMAND nlp_tests_onnx_embed)
+
+    # ONNX Integration Tests — always compiled; entire file is inside #ifdef NLP_WITH_ONNX
+    # so with DISABLE_ONNX=ON the binary contains 0 tests and exits cleanly.
+    # Individual tests SKIP at runtime when the model file is not present.
+    add_executable(nlp_tests_onnx_integration tests/test_nlp_onnx_integration.cpp)
+    target_link_libraries(nlp_tests_onnx_integration PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_dependencies(nlp_tests_onnx_integration prepare_data)
+    add_test(NAME nlp_engine_onnx_integration_test COMMAND nlp_tests_onnx_integration)
 endif()
 
 # -----------------------------------------------------------------------------
@@ -306,6 +397,11 @@ message(STATUS "C++ Standard:    ${CMAKE_CXX_STANDARD}")
 message(STATUS "Doxygen Found:   ${DOXYGEN_FOUND}")
 message(STATUS "Build Testing:   ${BUILD_TESTING}")
 message(STATUS "Python Bindings: ${BUILD_PYTHON_BINDINGS}")
+if(DISABLE_ONNX)
+    message(STATUS "ONNX Addon:      OFF (DISABLE_ONNX=ON)")
+else()
+    message(STATUS "ONNX Addon:      ON  (DISABLE_ONNX=OFF, enabled by default)")
+endif()
 message(STATUS "Clang-Format:    ${CLANG_FORMAT_EXE}")
 message(STATUS "Bun:             ${BUN_EXE}")
 message(STATUS "")

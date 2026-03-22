@@ -58,12 +58,13 @@
     {
       "name": "ci-ubuntu",
       "displayName": "CI Ubuntu Configuration",
-      "description": "Configuration for GitHub Actions Ubuntu 24.04 environment using system Clang 18",
+      "description": "Configuration for GitHub Actions Ubuntu 24.04 with Clang 22 from apt.llvm.org",
       "inherits": "default",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_C_COMPILER": "clang-18",
-        "CMAKE_CXX_COMPILER": "clang++-18"
+        "CMAKE_C_COMPILER": "clang-22",
+        "CMAKE_CXX_COMPILER": "clang++-22",
+        "DISABLE_ONNX": "ON"
       }
     }
   ],
@@ -87,12 +88,24 @@
     {
       "name": "build-ci",
       "configurePreset": "ci-ubuntu"
+    },
+    {
+      "name": "build-ci-test",
+      "configurePreset": "ci-ubuntu",
+      "targets": ["all"]
     }
   ],
   "testPresets": [
     {
       "name": "test-default",
       "configurePreset": "default",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "test-ci",
+      "configurePreset": "ci-ubuntu",
       "output": {
         "outputOnFailure": true
       }

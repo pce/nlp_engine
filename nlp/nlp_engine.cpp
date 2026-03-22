@@ -114,6 +114,11 @@ NLPEngine::NLPEngine(std::shared_ptr<NLPModel> model) : model_(model) {
     }
 }
 
+NLPEngine::NLPEngine(std::shared_ptr<NLPModel> model,
+                     std::shared_ptr<OnnxService> onnx)
+    : model_(std::move(model)), onnx_(std::move(onnx)) {
+}
+
 LanguageProfile NLPEngine::detect_language(const std::string& text) {
     LanguageProfile profile{.language = "en", .confidence = 0.0f};
     if (text.empty() || !model_) return profile;
@@ -377,21 +382,78 @@ int NLPEngine::levenshtein_distance(const std::string& s1, const std::string& s2
     return d[n][m];
 }
 
-SummaryResult NLPEngine::summarize(const std::string& text, float ratio) {
+SummaryResult NLPEngine::summarize(const std::string& text, float ratio,
+                                    std::string_view query) {
     auto sentences = split_sentences(text);
-    auto tfidf = calculate_tfidf(text);
-    std::vector<std::pair<size_t, float>> scores;
-    for (size_t i = 0; i < sentences.size(); ++i) scores.push_back({i, calculate_sentence_score(sentences[i], tfidf)});
+    if (sentences.empty()) return {{}, {}, ratio, (int)text.length(), 0};
 
-    std::sort(scores.begin(), scores.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::vector<std::pair<size_t, float>> scores;
+    scores.reserve(sentences.size());
+
+    // ── Semantic path: ONNX available ────────────────────────────────────────
+    if (has_onnx()) {
+        // Embed all sentences in one batch for efficiency.
+        std::vector<std::string> inputs(sentences.begin(), sentences.end());
+        auto embeddings = onnx_->embed_batch(inputs);
+
+        // Determine the anchor: query embedding OR document centroid.
+        inference::EmbeddingResult anchor;
+        if (!query.empty()) {
+            anchor = onnx_->embed(std::string(query));
+        } else {
+            // Centroid: element-wise mean of all successful embeddings.
+            std::vector<float> centroid;
+            size_t dims = 0;
+            int    valid = 0;
+            for (const auto& e : embeddings) {
+                if (!e.success) continue;
+                if (centroid.empty()) { centroid.resize(e.vector.size(), 0.0f); dims = e.vector.size(); }
+                for (size_t d = 0; d < dims; ++d) centroid[d] += e.vector[d];
+                ++valid;
+            }
+            if (valid > 0) {
+                float inv = 1.0f / static_cast<float>(valid);
+                for (auto& v : centroid) v *= inv;
+                // L2-normalise the centroid so dot-product == cosine similarity.
+                float norm = 0.0f;
+                for (float v : centroid) norm += v * v;
+                norm = std::sqrt(norm);
+                if (norm > 1e-9f) for (auto& v : centroid) v /= norm;
+                anchor.vector  = std::move(centroid);
+                anchor.success = true;
+            }
+        }
+
+        if (anchor.success) {
+            for (size_t i = 0; i < embeddings.size(); ++i) {
+                float sim = anchor.cosine_similarity(embeddings[i]);
+                scores.push_back({i, sim});
+            }
+        }
+    }
+
+    // ── TF-IDF fallback (or ONNX unavailable / all embeddings failed) ────────
+    if (scores.empty()) {
+        auto tfidf = calculate_tfidf(text);
+        for (size_t i = 0; i < sentences.size(); ++i)
+            scores.push_back({i, calculate_sentence_score(sentences[i], tfidf)});
+    }
+
+    std::sort(scores.begin(), scores.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
     size_t count = std::max(size_t(1), size_t(sentences.size() * ratio));
     std::vector<size_t> selected;
-    for (size_t i = 0; i < std::min(count, scores.size()); ++i) selected.push_back(scores[i].first);
+    for (size_t i = 0; i < std::min(count, scores.size()); ++i)
+        selected.push_back(scores[i].first);
     std::sort(selected.begin(), selected.end());
 
     std::string summary;
-    for (auto idx : selected) summary += sentences[idx] + " ";
-    return {summary, selected, ratio, (int)text.length(), (int)summary.length()};
+    for (auto idx : selected) { summary += sentences[idx]; summary += ' '; }
+    if (!summary.empty() && summary.back() == ' ') summary.pop_back();
+
+    return {std::move(summary), std::move(selected), ratio,
+            (int)text.length(), (int)summary.length()};
 }
 
 std::map<std::string, float> NLPEngine::calculate_tfidf(const std::string& text) {
@@ -744,6 +806,116 @@ json NLPEngine::sentiment_to_json(const SentimentResult& s) {
 
 json NLPEngine::toxicity_to_json(const ToxicityResult& t) {
     return {{"is_toxic", t.is_toxic}, {"score", t.score}, {"category", t.category}};
+}
+
+// ── ONNX-powered semantic methods ────────────────────────────────────────────
+
+inference::EmbeddingResult NLPEngine::embed(std::string_view text) {
+    if (!has_onnx()) {
+        inference::EmbeddingResult r;
+        r.success = false;
+        r.error   = "No ONNX service attached — call set_onnx_service() first.";
+        return r;
+    }
+    return onnx_->embed(std::string(text));
+}
+
+std::vector<SemanticMatch> NLPEngine::semantic_search(
+        std::string_view query,
+        const std::vector<std::string>& documents,
+        size_t top_k) {
+
+    if (!has_onnx() || documents.empty()) return {};
+
+    // Embed query once.
+    auto q_emb = onnx_->embed(std::string(query));
+    if (!q_emb.success) return {};
+
+    // Embed all documents in a single batch.
+    auto doc_embs = onnx_->embed_batch(documents);
+
+    std::vector<SemanticMatch> results;
+    results.reserve(doc_embs.size());
+
+    for (size_t i = 0; i < doc_embs.size(); ++i) {
+        if (!doc_embs[i].success) continue;
+        float score = q_emb.cosine_similarity(doc_embs[i]);
+        results.push_back({documents[i], score, i});
+    }
+
+    std::sort(results.begin(), results.end(),
+              [](const SemanticMatch& a, const SemanticMatch& b) {
+                  return a.score > b.score;
+              });
+
+    if (top_k > 0 && results.size() > top_k)
+        results.resize(top_k);
+
+    return results;
+}
+
+json NLPEngine::extract_schema(const std::string& text,
+                                const json& schema,
+                                const std::vector<SchemaField>& fields) {
+    json result;
+    json scores_obj;
+
+    if (!has_onnx()) {
+        result["_error"] = "No ONNX service attached.";
+        return result;
+    }
+
+    // Build field list: explicit override takes priority over schema JSON.
+    std::vector<SchemaField> field_list = fields;
+    if (field_list.empty()) {
+        for (auto it = schema.begin(); it != schema.end(); ++it) {
+            std::string desc = it.value().is_string()
+                               ? it.value().get<std::string>()
+                               : it.key();  // Fallback: use key as hint.
+            field_list.push_back({it.key(), desc});
+        }
+    }
+
+    if (field_list.empty()) {
+        result["_error"] = "Schema is empty.";
+        return result;
+    }
+
+    // Split text into candidate sentences.
+    auto sentences = split_sentences(text);
+    if (sentences.empty()) return result;
+
+    // Embed all sentences once — shared across all fields.
+    auto sent_embs = onnx_->embed_batch(
+        std::vector<std::string>(sentences.begin(), sentences.end()));
+
+    // For each schema field: embed the description, find the best sentence.
+    for (const auto& field : field_list) {
+        auto field_emb = onnx_->embed(field.description);
+        if (!field_emb.success) {
+            result[field.name]          = nullptr;
+            scores_obj[field.name]      = 0.0f;
+            continue;
+        }
+
+        size_t best_idx   = 0;
+        float  best_score = -2.0f;
+
+        for (size_t i = 0; i < sent_embs.size(); ++i) {
+            if (!sent_embs[i].success) continue;
+            float sim = field_emb.cosine_similarity(sent_embs[i]);
+            if (sim > best_score) {
+                best_score = sim;
+                best_idx   = i;
+            }
+        }
+
+        result[field.name]     = (best_score > -2.0f) ? sentences[best_idx] : "";
+        scores_obj[field.name] = best_score;
+    }
+
+    result["_scores"] = std::move(scores_obj);
+    return result;
 }
 
 } // namespace pce::nlp

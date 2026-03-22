@@ -2,6 +2,7 @@ name: NLP Engine CI
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  LLVM_VERSION: 19
 
 on:
   push:
@@ -21,34 +22,31 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # Ubuntu 24.04 (Noble) includes modern LLVM/Clang in its default repos.
-          # We install Clang 18 to ensure full C++23 compliance (std::expected, etc.)
-          sudo apt-get install -y cmake build-essential clang-18 clang-format-18
-          # Set Clang 18 as the default compiler
-          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 100
-          sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 100
-          # Ensure clang-format points to version 18
-          sudo ln -sf /usr/bin/clang-format-18 /usr/bin/clang-format
+          sudo apt-get install -y cmake build-essential wget
+          # Install Clang/LLVM from apt.llvm.org — distro packages lag behind
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- ${{ env.LLVM_VERSION }}
+          sudo apt-get install -y clang-format-${{ env.LLVM_VERSION }}
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-${{ env.LLVM_VERSION }} 100
+          sudo update-alternatives --install /usr/bin/cc  cc  /usr/bin/clang-${{ env.LLVM_VERSION }}   100
+          sudo ln -sf /usr/bin/clang-format-${{ env.LLVM_VERSION }} /usr/bin/clang-format
 
       - name: Configure CMake
-        run: |
-          mkdir build
-          # Disable CppUTest memory macros via CXXFLAGS to avoid conflict with Ubuntu's libstdc++ regex
-          export CXXFLAGS="$CXXFLAGS -DCPPUTEST_MEM_LEAK_DETECTION_DISABLED=1"
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTING=ON \
-            -DBUILD_PYTHON_BINDINGS=OFF
+        run: cmake --preset ci-ubuntu
 
       - name: Build C++ Core
         run: cmake --build build --parallel $(nproc)
 
-      - name: Run C++ Unit Tests (CppUTest)
+      - name: Run C++ Unit Tests
         working-directory: build
         run: |
           ./nlp_tests
-          ./nlp_tests_markov
+          ./nlp_tests_linguistics
           ./nlp_tests_async
+          ./nlp_tests_markov
+          ./nlp_tests_graph
+          ./nlp_tests_unicode
+          ./nlp_tests_onnx_tokenizer
+          ./nlp_tests_onnx_embed
 
       - name: Check Code Style (Clang-Format)
         run: |
