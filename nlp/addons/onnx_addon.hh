@@ -42,12 +42,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -106,15 +108,15 @@ public:
     ~ONNXAddon() override = default;
     ONNXAddon(const ONNXAddon&)             = delete;  // Ort::Session is not copyable
     ONNXAddon& operator=(const ONNXAddon&)  = delete;
-    ONNXAddon(ONNXAddon&&) noexcept         = default;
-    ONNXAddon& operator=(ONNXAddon&&) noexcept = default;
+    ONNXAddon(ONNXAddon&&) noexcept         = delete;  // std::shared_mutex is not movable
+    ONNXAddon& operator=(ONNXAddon&&) noexcept = delete;
 
     // ── NLPAddon CRTP interface ───────────────────────────────────────────────
 
     const std::string& name_impl()     const { return name_; }
     const std::string& version_impl()  const { return version_; }
-    bool               init_impl()           { return is_loaded_; }
-    bool               is_ready_impl() const { return is_loaded_; }
+    bool               init_impl()           { return is_loaded_.load(std::memory_order_acquire); }
+    bool               is_ready_impl() const { return is_loaded_.load(std::memory_order_acquire); }
 
     /**
      * @brief process_impl — dispatches by options["method"].
@@ -132,7 +134,7 @@ public:
             const std::unordered_map<std::string, std::string>& options,
             std::shared_ptr<AddonContext> context = nullptr) {
 
-        if (!is_loaded_) {
+        if (!is_loaded_.load(std::memory_order_acquire)) {
             return {"", false,
                     "ONNXAddon: no model loaded. Call load_model() before use.", {}};
         }
@@ -228,6 +230,7 @@ public:
      * Inject before calling load_model(). Any ITokenizer implementation is accepted.
      */
     void set_tokenizer(std::unique_ptr<tokenizer::ITokenizer> tok) {
+        std::unique_lock lock(rw_mutex_);
         tokenizer_ = std::move(tok);
     }
 
@@ -236,6 +239,7 @@ public:
     /** @brief Embed a single sentence → L2-normalised float vector. */
     [[nodiscard]] inference::EmbeddingResult
     embed(const std::string& text) override {
+        std::shared_lock lock(rw_mutex_);
         auto batch = run_text_inference({text});
         return batch.empty()
                ? inference::EmbeddingResult{{}, text, 0, false, "inference failed"}
@@ -245,6 +249,7 @@ public:
     /** @brief Embed a batch of sentences in one forward pass. */
     [[nodiscard]] std::vector<inference::EmbeddingResult>
     embed_batch(const std::vector<std::string>& texts) override {
+        std::shared_lock lock(rw_mutex_);
         return run_text_inference(texts);
     }
 
@@ -256,9 +261,12 @@ public:
      */
     [[nodiscard]] float
     similarity(const std::string& a, const std::string& b) override {
-        const auto ra = embed(a);
-        const auto rb = embed(b);
-        return ra.cosine_similarity(rb);
+        // Batch both texts in a single forward pass — avoids acquiring the lock
+        // twice and halves the number of ONNX session invocations.
+        std::shared_lock lock(rw_mutex_);
+        const auto results = run_text_inference({a, b});
+        if (results.size() < 2) return 0.0f;
+        return results[0].cosine_similarity(results[1]);
     }
 
     /**
@@ -273,6 +281,7 @@ public:
     tag(const std::string& text,
         const std::vector<std::string>& labels = {}) override {
 
+        std::shared_lock lock(rw_mutex_);
         const auto raw = run_generic_inference(text);
         if (!raw.success) {
             return {{}, text, false, raw.error};
@@ -327,6 +336,7 @@ public:
      */
     [[nodiscard]] inference::InferenceResult
     infer(const std::string& text) override {
+        std::shared_lock lock(rw_mutex_);
         return run_generic_inference(text);
     }
 
@@ -364,10 +374,11 @@ public:
 
     // ── Accessors ─────────────────────────────────────────────────────────────
 
-    [[nodiscard]] size_t        dimensions()  const noexcept override { return dimensions_; }
-    [[nodiscard]] bool          is_loaded()   const noexcept override { return is_loaded_; }
+    [[nodiscard]] size_t        dimensions()  const noexcept override { return dimensions_.load(std::memory_order_acquire); }
+    [[nodiscard]] bool          is_loaded()   const noexcept override { return is_loaded_.load(std::memory_order_acquire); }
     [[nodiscard]] const Config& config()      const noexcept          { return config_; }
-    [[nodiscard]] size_t        vocab_size()  const noexcept          {
+    [[nodiscard]] size_t        vocab_size()  const noexcept {
+        std::shared_lock lock(rw_mutex_);
         return tokenizer_ ? tokenizer_->vocab_size() : 0;
     }
 
@@ -377,11 +388,29 @@ private:
     std::string name_    = "onnx_engine";
     std::string version_ = "1.0.0";
 
+    // ── Synchronisation ───────────────────────────────────────────────────────
+    // Protects: session_, tokenizer_, cached_out_names_.
+    // is_loaded_ and dimensions_ are separate atomics for lock-free observer reads.
+    //
+    // Lock discipline:
+    //   unique_lock  — initialise_session(), set_tokenizer()        (write paths)
+    //   shared_lock  — embed(), embed_batch(), similarity(), tag(),  (read paths)
+    //                  infer(), vocab_size()
+    //
+    // Private helpers (run_text_inference, run_generic_inference, forward)
+    // assume the caller already holds at least a shared_lock on rw_mutex_.
+
+    mutable std::shared_mutex rw_mutex_;
+
     // ── State ─────────────────────────────────────────────────────────────────
 
-    Config  config_;
-    bool    is_loaded_  = false;
-    size_t  dimensions_ = 0;
+    Config              config_;
+    std::atomic<bool>   is_loaded_  {false};
+    std::atomic<size_t> dimensions_ {0};
+
+    // Output node names — populated once in initialise_session(), then read-only.
+    // Avoids repeated GetOutputNameAllocated() allocator calls during inference.
+    std::vector<std::string> cached_out_names_;
 
     // Default tokeniser — replaceable via set_tokenizer()
     std::unique_ptr<tokenizer::ITokenizer> tokenizer_ =
@@ -395,9 +424,14 @@ private:
     // ── Session initialisation ────────────────────────────────────────────────
 
     bool initialise_session() {
-        is_loaded_  = false;
-        dimensions_ = 0;
+        // Exclusive write lock: no inference can proceed while we (re)load.
+        std::unique_lock lock(rw_mutex_);
+
+        // Reset state before attempting to load.
+        is_loaded_.store(false, std::memory_order_release);
+        dimensions_.store(0, std::memory_order_release);
         session_.reset();
+        cached_out_names_.clear();
 
         if (config_.model_path.empty() ||
             !std::filesystem::exists(config_.model_path)) {
@@ -431,9 +465,23 @@ private:
             const auto shape = session_->GetOutputTypeInfo(0)
                                         .GetTensorTypeAndShapeInfo()
                                         .GetShape();
-            dimensions_ = static_cast<size_t>(shape.back() > 0 ? shape.back() : 384);
+            const size_t dims = static_cast<size_t>(shape.back() > 0 ? shape.back() : 384);
 
-            is_loaded_ = true;
+            // Cache output node names once — avoids allocator overhead per inference call.
+            // The names are stable for the lifetime of the session.
+            Ort::AllocatorWithDefaultOptions alloc;
+            const size_t num_outputs = session_->GetOutputCount();
+            cached_out_names_.reserve(num_outputs);
+            for (size_t i = 0; i < num_outputs; ++i) {
+                cached_out_names_.push_back(
+                    session_->GetOutputNameAllocated(i, alloc).get());
+            }
+
+            // Publish with release semantics: inference threads that observe
+            // is_loaded_ == true are guaranteed to see the fully initialised
+            // session_ and cached_out_names_ written above.
+            dimensions_.store(dims, std::memory_order_release);
+            is_loaded_.store(true,  std::memory_order_release);
             return true;
 
         } catch (const Ort::Exception&) {
@@ -496,9 +544,12 @@ private:
 
     // ── Text inference (embedding) ────────────────────────────────────────────
 
+    // CALLER MUST HOLD at least a shared_lock on rw_mutex_.
+    // Ort::Session::Run() is documented thread-safe; input tensors are all
+    // stack-local so concurrent calls on the same session are fine.
     std::vector<inference::EmbeddingResult>
     run_text_inference(const std::vector<std::string>& texts) {
-        if (!is_loaded_) {
+        if (!is_loaded_.load(std::memory_order_relaxed)) {
             std::vector<inference::EmbeddingResult> results;
             for (const auto& t : texts)
                 results.push_back({{}, t, 0, false, "ONNXAddon: model not loaded"});
@@ -533,7 +584,7 @@ private:
                                               {config_.output_name});
 
                 const float* raw    = output_tensors[0].GetTensorData<float>();
-                const size_t hidden = dimensions_;
+                const size_t hidden = dimensions_.load(std::memory_order_relaxed);
 
                 for (size_t b = 0; b < bsz; ++b) {
                     inference::EmbeddingResult r;
@@ -576,9 +627,16 @@ private:
 
     // ── Generic inference (tagging, classification) ───────────────────────────
 
+    // CALLER MUST HOLD at least a shared_lock on rw_mutex_.
+    // Uses cached_out_names_ set by initialise_session() — zero allocator overhead.
     inference::InferenceResult run_generic_inference(const std::string& text) {
-        if (!is_loaded_)
+        if (!is_loaded_.load(std::memory_order_relaxed))
             return {{}, {}, {}, false, "ONNXAddon: model not loaded"};
+
+        if (cached_out_names_.empty())
+            return {{}, {}, {}, false,
+                    "ONNXAddon: output names not cached — was load_model() called?"};
+
         const size_t seqlen = config_.max_sequence_len;
         const auto   enc    = tokenizer_->encode(text, seqlen);
 
@@ -589,21 +647,11 @@ private:
         inference::InferenceResult result;
 
         try {
-            Ort::AllocatorWithDefaultOptions alloc;
-            const size_t num_outputs = session_->GetOutputCount();
+            auto output_tensors = forward(ids, mask, type, 1, seqlen, cached_out_names_);
 
-            std::vector<std::string> out_names;
-            out_names.reserve(num_outputs);
-            for (size_t i = 0; i < num_outputs; ++i) {
-                out_names.push_back(
-                    session_->GetOutputNameAllocated(i, alloc).get());
-            }
-
-            auto output_tensors = forward(ids, mask, type, 1, seqlen, out_names);
-
-            result.output_names = out_names;
-            result.outputs.reserve(num_outputs);
-            result.shapes.reserve(num_outputs);
+            result.output_names = cached_out_names_;
+            result.outputs.reserve(cached_out_names_.size());
+            result.shapes.reserve(cached_out_names_.size());
 
             for (auto& tensor : output_tensors) {
                 const auto   info = tensor.GetTensorTypeAndShapeInfo();

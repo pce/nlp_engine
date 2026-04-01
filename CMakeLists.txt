@@ -277,7 +277,7 @@ if(BUILD_TESTING)
     add_dependencies(nlp_tests_onnx_tokenizer prepare_data)
     add_test(NAME nlp_engine_onnx_tokenizer_test COMMAND nlp_tests_onnx_tokenizer)
 
-    # ONNX Embed Tests — always compiled; internal #ifdef NLP_WITH_ONNX guards the
+    # ONNX Embed Tests behind #ifdef NLP_WITH_ONNX, guards the
     # addon-dependent sections, so EmbeddingResult / TagResult / InferenceResult
     # math tests run in every build including -DDISABLE_ONNX=ON builds.
     add_executable(nlp_tests_onnx_embed tests/test_nlp_onnx_embed.cpp)
@@ -285,13 +285,37 @@ if(BUILD_TESTING)
     add_dependencies(nlp_tests_onnx_embed prepare_data)
     add_test(NAME nlp_engine_onnx_embed_test COMMAND nlp_tests_onnx_embed)
 
-    # ONNX Integration Tests — always compiled; entire file is inside #ifdef NLP_WITH_ONNX
+    # ONNX Integration Tests behind #ifdef NLP_WITH_ONNX
     # so with DISABLE_ONNX=ON the binary contains 0 tests and exits cleanly.
     # Individual tests SKIP at runtime when the model file is not present.
     add_executable(nlp_tests_onnx_integration tests/test_nlp_onnx_integration.cpp)
     target_link_libraries(nlp_tests_onnx_integration PRIVATE nlp_engine Catch2::Catch2WithMain)
     add_dependencies(nlp_tests_onnx_integration prepare_data)
     add_test(NAME nlp_engine_onnx_integration_test COMMAND nlp_tests_onnx_integration)
+
+    # ONNX Service-Slot Smoke Tests — rewrites the old broken test_nlp_onnx.cpp
+    # (which called non-existent addAddon/loadModel) with correct stub-based tests
+    # for the new typed service-slot API.  No ONNX Runtime dependency.
+    add_executable(nlp_tests_onnx tests/test_nlp_onnx.cpp)
+    target_link_libraries(nlp_tests_onnx PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_test(NAME nlp_engine_onnx_test COMMAND nlp_tests_onnx)
+
+    # Classifier Service Tests — no ONNX Runtime required; all IOnnxService /
+    # IClassifierService interactions go through in-process mocks.  Covers
+    # OnnxClassifier softmax / sigmoid math, score ordering, edge cases, and
+    # the IClassifierService polymorphic interface contract.
+    add_executable(nlp_tests_classifier tests/test_nlp_classifier.cpp)
+    target_link_libraries(nlp_tests_classifier PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_test(NAME nlp_engine_classifier_test COMMAND nlp_tests_classifier)
+
+    # NLPEngine Service Slot Tests — verifies the four typed service slots
+    # (onnx_, sentiment_, toxicity_, ner_), NLPModel::create_empty(), the
+    # NLPEngine default constructor, and classical fallback behaviour when no
+    # neural service is attached.  Also mock-only; no model files required.
+    add_executable(nlp_tests_engine_slots tests/test_nlp_engine_slots.cpp)
+    target_link_libraries(nlp_tests_engine_slots PRIVATE nlp_engine Catch2::Catch2WithMain)
+    add_dependencies(nlp_tests_engine_slots prepare_data)
+    add_test(NAME nlp_engine_slots_test COMMAND nlp_tests_engine_slots)
 endif()
 
 # -----------------------------------------------------------------------------

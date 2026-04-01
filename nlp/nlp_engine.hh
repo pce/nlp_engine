@@ -15,15 +15,17 @@
 
 #include "addons/onnx/onnx_service.hh"
 #include "addons/onnx/inference_result.hh"
-
-using json = nlohmann::json;
+#include "addons/onnx/classifier_service.hh"
 
 namespace pce::nlp {
 
-// Forward declaration — avoids pulling in the full ONNX addon header here.
-// The IOnnxService interface itself has zero ONNX Runtime dependency.
-// See: nlp/addons/onnx/onnx_service.hh
-using OnnxService = onnx::IOnnxService;
+/** @brief Alias for the embedding/tagging service interface. */
+using OnnxService       = onnx::IOnnxService;
+
+/** @brief Alias for the text-classification service interface. */
+using ClassifierService = onnx::IClassifierService;
+
+using json = nlohmann::json;
 
 class GraphAddon;
 
@@ -145,6 +147,15 @@ public:
   NLPModel() = default;
 
   /**
+   * @brief Create a ready model with empty data — no files required.
+   *
+   * All accessors return empty containers.  Classical NLP methods degrade
+   * gracefully to fallback results.  Use this when only ONNX services will
+   * be loaded and dictionary-based features are not needed.
+   */
+  static std::shared_ptr<NLPModel> create_empty();
+
+  /**
    * @brief Destructor.
    */
   ~NLPModel() = default;
@@ -255,8 +266,17 @@ class NLPEngine {
 public:
   /**
    * @brief Construct engine with a shared model.
-   * @param model Pointer to a loaded NLPModel.
+   * @param model Non-null pointer to an NLPModel (need not be loaded yet).
+   * @throws std::invalid_argument if model is null.
    */
+  /**
+   * @brief Construct with an empty model so no data files are required.
+   *
+   * Equivalent to `NLPEngine(NLPModel::create_empty())`.  Classical features
+   * degrade gracefully; attach ONNX service slots for neural coverage.
+   */
+  NLPEngine();
+
   explicit NLPEngine(std::shared_ptr<NLPModel> model);
 
   /**
@@ -265,8 +285,9 @@ public:
    * Convenience overload so callers do not need a separate set_onnx_service()
    * call when they already have an ONNXAddon ready.
    *
-   * @param model  Loaded NLPModel.
+   * @param model  Non-null NLPModel.
    * @param onnx   Loaded IOnnxService (e.g. an ONNXAddon with load_model() called).
+   * @throws std::invalid_argument if model is null.
    */
   NLPEngine(std::shared_ptr<NLPModel> model,
             std::shared_ptr<OnnxService> onnx);
@@ -284,8 +305,39 @@ public:
    *
    * @param svc  A loaded IOnnxService, or nullptr to detach.
    */
+  /** @brief Attach the sentence-embedding service (all-MiniLM-L6-v2). */
   void set_onnx_service(std::shared_ptr<OnnxService> svc) noexcept {
     onnx_ = std::move(svc);
+  }
+
+  /**
+   * @brief Attach a sentiment classifier (e.g. DistilBERT SST-2).
+   *
+   * When set, analyze_sentiment() uses this model instead of the lexicon.
+   * Expected labels in id2label order: NEGATIVE (0), POSITIVE (1).
+   */
+  void set_sentiment_service(std::shared_ptr<ClassifierService> svc) noexcept {
+    sentiment_ = std::move(svc);
+  }
+
+  /**
+   * @brief Attach a toxicity classifier (e.g. Toxic-BERT).
+   *
+   * When set, detect_toxicity() uses this model instead of the word list.
+   * Supports both softmax (binary) and sigmoid (multi-label) classifiers.
+   */
+  void set_toxicity_service(std::shared_ptr<ClassifierService> svc) noexcept {
+    toxicity_ = std::move(svc);
+  }
+
+  /**
+   * @brief Attach a NER service (e.g. bert-base-NER).
+   *
+   * When set, extract_entities() uses IOnnxService::tag() with BIO labels
+   * instead of the regex and capitalisation heuristics.
+   */
+  void set_ner_service(std::shared_ptr<OnnxService> svc) noexcept {
+    ner_ = std::move(svc);
   }
 
   /**
@@ -294,8 +346,24 @@ public:
    * Gate all semantic methods behind this check when building on top of
    * NLPEngine — they return empty / fallback results when it is false.
    */
+  /** @brief True when the embedding service is attached and loaded. */
   [[nodiscard]] bool has_onnx() const noexcept {
     return onnx_ != nullptr && onnx_->is_loaded();
+  }
+
+  /** @brief True when the sentiment classifier is attached and loaded. */
+  [[nodiscard]] bool has_sentiment_model() const noexcept {
+    return sentiment_ != nullptr && sentiment_->is_loaded();
+  }
+
+  /** @brief True when the toxicity classifier is attached and loaded. */
+  [[nodiscard]] bool has_toxicity_model() const noexcept {
+    return toxicity_ != nullptr && toxicity_->is_loaded();
+  }
+
+  /** @brief True when the NER service is attached and loaded. */
+  [[nodiscard]] bool has_ner_model() const noexcept {
+    return ner_ != nullptr && ner_->is_loaded();
   }
 
   /**
@@ -375,8 +443,10 @@ public:
 
   /**
    * @brief Calculates term frequency - inverse document frequency scores.
+   * @param lang ISO-639-1 language code used for stopword filtering (default "en").
    */
-  std::map<std::string, float> calculate_tfidf(const std::string& text);
+  std::map<std::string, float> calculate_tfidf(const std::string& text,
+                                                const std::string& lang = "en");
 
   /**
    * @brief Extracts the most relevant keywords from a text.
@@ -511,8 +581,11 @@ public:
   json toxicity_to_json(const ToxicityResult& toxicity);
 
 private:
-  std::shared_ptr<NLPModel>   model_;
-  std::shared_ptr<OnnxService> onnx_;   ///< Optional; null when ONNX is disabled.
+  std::shared_ptr<NLPModel>        model_;
+  std::shared_ptr<OnnxService>     onnx_;       ///< Embeddings — all-MiniLM-L6-v2
+  std::shared_ptr<ClassifierService> sentiment_; ///< Sentiment — DistilBERT SST-2
+  std::shared_ptr<ClassifierService> toxicity_;  ///< Toxicity  — Toxic-BERT
+  std::shared_ptr<OnnxService>     ner_;         ///< NER       — bert-base-NER
 
   // Helper Methods
   std::string to_lower(const std::string& str);
